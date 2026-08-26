@@ -52,7 +52,7 @@ export function Settings({ snap, onChange, surface = "yard" }: Props) {
               setTelemetry(optIn);
             }}
           />
-          Allow Switchyard telemetry (off sends SWITCHYARD_TELEMETRY_OPT_OUT=1)
+          Allow MaskClaw telemetry (off sends SWITCHYARD_TELEMETRY_OPT_OUT=1)
         </label>
       </header>
       {maskclawLayout ? (

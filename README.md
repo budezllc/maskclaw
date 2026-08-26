@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/og.png" alt="MaskClaw — On-prem privacy layer" width="800">
+</p>
+
 # MASKCLAW
 
 On-prem privacy proxy for OpenAI-compatible LLM clients. Prompts hit MaskClaw first. Secrets and PII become stable placeholders, the redacted request is routed (local or cloud), then originals are restored on the way back.

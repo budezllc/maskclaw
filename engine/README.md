@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Switchyard" width="800">
+  <img src="assets/logo.png" alt="MaskClaw" width="800">
 </p>
 
 # Switchyard

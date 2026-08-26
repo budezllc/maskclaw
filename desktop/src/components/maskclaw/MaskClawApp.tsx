@@ -410,7 +410,7 @@ export function MaskClawApp({ snap, pane, onPane, onChange, refresh, theme, onTh
           <p className="mc-brand-title">MASKCLAW</p>
         </div>
         <div className="mc-nav-wrap">
-          <p className="mc-group-label">Yard</p>
+          <p className="mc-group-label">MaskClaw</p>
           <nav className="mc-nav">
             {MASKCLAW_NAV_ITEMS.map((item) => (
               <button
