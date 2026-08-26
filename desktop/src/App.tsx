@@ -118,7 +118,7 @@ export function App() {
   if (!snap) {
     return (
       <div className="board">
-        <p>Reading the yard board…</p>
+        <p>Reading MaskClaw...</p>
       </div>
     );
   }

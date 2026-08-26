@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MaskClaw — On-prem privacy layer</title>
+    <meta name="description" content="On-prem privacy proxy for OpenAI-compatible LLM clients. Prompts hit MaskClaw first. Secrets and PII become stable placeholders." />
+    <meta property="og:title" content="MaskClaw" />
+    <meta property="og:description" content="On-prem privacy layer for OpenAI-compatible LLM clients." />
+    <meta property="og:image" content="og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="icon" href="favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <style>
+      :root {
+        --gold: #d4af37;
+        --ink: #000;
+        --chalk: #f4f1ea;
+        --mute: rgba(244, 241, 234, 0.62);
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        min-height: 100%;
+        background: var(--ink);
+        color: var(--chalk);
+        font-family: Inter, "Segoe UI", system-ui, sans-serif;
+      }
+      body {
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      .hero {
+        display: block;
+        width: 100%;
+        height: auto;
+        border: 1px solid rgba(212, 175, 55, 0.35);
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 0.9rem;
+        margin: 1.75rem 0 1.25rem;
+      }
+      header img.mark {
+        width: 56px;
+        height: 56px;
+      }
+      header p {
+        margin: 0;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        font-size: 0.78rem;
+        color: var(--gold);
+      }
+      h1 {
+        margin: 0 0 0.85rem;
+        font-size: clamp(2rem, 5vw, 3.1rem);
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+      .lede {
+        font-size: 1.15rem;
+        line-height: 1.55;
+        max-width: 40rem;
+      }
+      .gold { color: var(--gold); }
+      ul {
+        padding-left: 1.15rem;
+        line-height: 1.6;
+        color: var(--mute);
+      }
+      a {
+        color: var(--gold);
+      }
+      footer {
+        margin-top: 3rem;
+        padding-top: 1.25rem;
+        border-top: 1px solid rgba(212, 175, 55, 0.28);
+        color: var(--mute);
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <img class="hero" src="og.png" alt="MaskClaw — On-prem privacy layer" />
+    <header>
+      <img class="mark" src="mark.png" alt="MaskClaw mark" />
+      <p>On-prem privacy layer</p>
+    </header>
+    <h1>MASKCLAW</h1>
+    <p class="lede">
+      On-prem privacy proxy for OpenAI-compatible LLM clients.
+      Prompts hit MaskClaw first. Secrets and PII become stable placeholders,
+      the redacted request is routed (local or cloud), then originals are restored
+      on the way back.
+    </p>
+    <ul>
+      <li><strong class="gold">MASKCLAW DESKTOP</strong> — Windows 10/11 app</li>
+      <li><strong class="gold">MASKCLAW appliance</strong> — Raspberry Pi 5 box on the LAN</li>
+    </ul>
+    <p class="lede">
+      Source:
+      <a href="https://github.com/budezllc/maskclaw">github.com/budezllc/maskclaw</a>
+    </p>
+    <footer>
+      GitHub Pages: serve <code>docs/</code> from <code>main</code>
+      (Settings → Pages → Deploy from a branch → <code>main</code> / <code>/docs</code>,
+      or use the Pages workflow).
+    </footer>
+  </body>
+</html>
