@@ -1,0 +1,10 @@
+{
+  "name": "maskclaw",
+  "private": true,
+  "scripts": {
+    "test": "node --test scripts/repo-layout.test.mjs",
+    "test:desktop": "npm --prefix desktop test",
+    "test:desktop:rust": "npm --prefix desktop run test:rust",
+    "test:appliance": "python -m unittest discover -s appliance/tests -p test_*.py"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "total_requests": 2,
+  "total_errors": 0,
+  "models": {
+    "MiniMax-M3": {
+      "calls": 2,
+      "errors": 0,
+      "prompt_tokens": 8707,
+      "completion_tokens": 1391,
+      "cached_tokens": 0,
+      "cache_creation_tokens": 0,
+      "reasoning_tokens": 0
+    }
+  },
+  "routing_overhead": { "count": 2, "total_ms": 18.63 },
+  "routing_fallbacks": { "context_window": 0, "unavailable": 0 },
+  "classifier": {
+    "total_requests": 2,
+    "total_errors": 2,
+    "models": {
+      "unsloth/gemma-4-E4B-it-GGUF": {
+        "calls": 0,
+        "errors": 2,
+        "prompt_tokens": 0,
+        "completion_tokens": 0
+      }
+    }
+  }
+}

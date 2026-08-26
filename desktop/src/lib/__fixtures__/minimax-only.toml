@@ -1,0 +1,26 @@
+schema_version = 1
+
+[llm_clients.minimax]
+format = "openai_chat"
+base_url = "https://api.minimax.io/v1"
+api_key_env = "MINIMAX_API_KEY"
+
+[targets.strong]
+id = "MiniMax-M3"
+llm_client = "minimax"
+
+[routes.smart]
+id = "switchyard"
+type = "passthrough"
+target = "strong"
+context_window = 1000000
+tool_calling = true
+reasoning = true
+
+[routes.minimax]
+id = "minimax-m3"
+type = "passthrough"
+target = "strong"
+context_window = 1000000
+tool_calling = true
+reasoning = true

@@ -1,0 +1,7 @@
+target
+gen
+binaries/*.exe
+binaries/switchyard-server-*
+binaries/sidecar-flavor.txt
+engine-flavor.txt
+!binaries/.gitkeep

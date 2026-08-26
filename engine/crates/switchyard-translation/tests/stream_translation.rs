@@ -1,0 +1,1200 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Tests for translating streaming provider events through the stream IR.
+
+pub mod common;
+
+use pretty_assertions::assert_eq;
+use serde_json::json;
+use switchyard_protocol::{ResponseAccumulator, StopReason};
+use switchyard_translation::{
+    LlmResponseChunk, StreamTranslationState, TranslationEngine, WireFormat, decode_stream_event,
+};
+
+use common::{REASONING_MODEL, text_and_encrypted_reasoning_details};
+
+type TestResult = std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+// Same-format replay returns the same parsed JSON value, including provider-specific fields.
+#[test]
+fn preserved_same_format_events_replay_unknown_fields_exactly() -> TestResult {
+    let cases = [
+        (
+            WireFormat::OpenAiChat,
+            json!({
+                "id": "chatcmpl-test",
+                "object": "chat.completion.chunk",
+                "model": "gpt-4o",
+                "system_fingerprint": "fp_provider_specific",
+                "choices": [{
+                    "index": 0,
+                    "delta": {"content": "Hi"},
+                    "finish_reason": null
+                }]
+            }),
+        ),
+        (
+            WireFormat::OpenAiResponses,
+            json!({
+                "type": "response.output_text.delta",
+                "item_id": "item-1",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": "Hi",
+                "sequence_number": 2,
+                "provider_extension": {"exact": true}
+            }),
+        ),
+        (
+            WireFormat::AnthropicMessages,
+            json!({
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "Hi"},
+                "provider_extension": {"exact": true}
+            }),
+        ),
+    ];
+
+    for (format, event) in cases {
+        let engine = TranslationEngine::default();
+        let mut state = StreamTranslationState::new(format, format);
+        let preserved = engine.decode_stream_event(&mut state, format, event.clone())?;
+        let replayed = engine.encode_stream_event(&mut state, format, preserved)?;
+        assert_eq!(replayed, vec![event]);
+    }
+    Ok(())
+}
+
+// A same-format error remains the last replayed event even if the source supplies more frames.
+#[test]
+fn preserved_same_format_replay_stops_after_an_error() -> TestResult {
+    let format = WireFormat::OpenAiResponses;
+    let events = [
+        json!({"type": "response.output_text.delta", "delta": "before"}),
+        json!({"type": "error", "message": "boom"}),
+        json!({"type": "response.output_text.delta", "delta": "after"}),
+        json!({"type": "response.completed", "response": {"id": "resp_1"}}),
+    ];
+    let engine = TranslationEngine::default();
+    let mut decode_state = StreamTranslationState::new(format, format);
+    let mut encode_state = StreamTranslationState::new(format, format);
+    let mut replayed = Vec::new();
+
+    for event in events {
+        let preserved = engine.decode_stream_event(&mut decode_state, format, event)?;
+        replayed.extend(engine.encode_stream_event(&mut encode_state, format, preserved)?);
+    }
+
+    assert_eq!(
+        replayed,
+        vec![
+            json!({"type": "response.output_text.delta", "delta": "before"}),
+            json!({"type": "error", "message": "boom"}),
+        ]
+    );
+    Ok(())
+}
+
+// Replay emits the preserved event without running the encoder, so the encoder never sees the
+// stop it would normally record. Replay must still leave the stream marked finished or
+// `finish_stream` synthesizes a terminal the client already received.
+#[test]
+fn replayed_terminal_event_suppresses_synthesized_finish() -> TestResult {
+    let cases = [
+        (
+            WireFormat::OpenAiChat,
+            vec![
+                json!({
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion.chunk",
+                    "model": "gpt-4o",
+                    "choices": [{"index": 0, "delta": {"content": "Hi"}, "finish_reason": null}]
+                }),
+                json!({
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion.chunk",
+                    "model": "gpt-4o",
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+                }),
+            ],
+        ),
+        (
+            WireFormat::AnthropicMessages,
+            vec![
+                json!({"type": "message_start", "message": {"id": "msg_1", "model": "claude"}}),
+                json!({"type": "message_stop"}),
+            ],
+        ),
+        (
+            WireFormat::OpenAiResponses,
+            vec![
+                json!({"type": "response.created", "response": {"id": "resp_1", "model": "gpt-4o"}}),
+                json!({"type": "response.completed", "response": {"id": "resp_1", "model": "gpt-4o"}}),
+            ],
+        ),
+    ];
+
+    let engine = TranslationEngine::default();
+    for (format, events) in cases {
+        let mut state = StreamTranslationState::new(format, format);
+        let mut replayed = Vec::new();
+        for event in &events {
+            let preserved = engine.decode_stream_event(&mut state, format, event.clone())?;
+            replayed.extend(engine.encode_stream_event(&mut state, format, preserved)?);
+        }
+        assert_eq!(replayed, events, "{format:?} engine replay");
+        assert!(
+            engine.finish_stream(&mut state, format)?.is_empty(),
+            "{format:?} engine replay already delivered a terminal event",
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn replayed_nonterminal_event_advances_encoder_state_before_finish() -> TestResult {
+    let engine = TranslationEngine::default();
+    let format = WireFormat::OpenAiChat;
+    let event = json!({
+        "id": "chatcmpl-clean-eof",
+        "object": "chat.completion.chunk",
+        "model": "gpt-4o",
+        "choices": [{
+            "index": 0,
+            "delta": {"role": "assistant", "content": "Hi"},
+            "finish_reason": null
+        }]
+    });
+    let mut decode_state = StreamTranslationState::new(format, format);
+    let preserved = engine.decode_stream_event(&mut decode_state, format, event.clone())?;
+
+    // Provider decoding and caller encoding are independent stream boundaries in a host such as
+    // NeMo Relay. Replay must therefore advance a fresh encoder state using the normalized view.
+    let mut encode_state = StreamTranslationState::new(format, format);
+    assert_eq!(
+        engine.encode_stream_event(&mut encode_state, format, preserved)?,
+        vec![event]
+    );
+    let finish = engine.finish_stream(&mut encode_state, format)?;
+
+    assert_eq!(finish.len(), 1);
+    assert_eq!(finish[0]["id"], "chatcmpl-clean-eof");
+    assert_eq!(finish[0]["model"], "gpt-4o");
+    assert_eq!(finish[0]["choices"][0]["finish_reason"], "stop");
+    Ok(())
+}
+
+#[test]
+fn replayed_anthropic_terminal_delta_finishes_with_message_stop_only() -> TestResult {
+    let engine = TranslationEngine::default();
+    let format = WireFormat::AnthropicMessages;
+    let events = [
+        json!({
+            "type": "message_start",
+            "message": {
+                "id": "msg_clean_eof",
+                "model": "claude",
+                "usage": {"input_tokens": 3, "output_tokens": 0}
+            }
+        }),
+        json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn", "stop_sequence": null},
+            "usage": {"output_tokens": 2}
+        }),
+    ];
+    let mut decode_state = StreamTranslationState::new(format, format);
+    let mut encode_state = StreamTranslationState::new(format, format);
+
+    for event in events {
+        let preserved = engine.decode_stream_event(&mut decode_state, format, event.clone())?;
+        assert_eq!(
+            engine.encode_stream_event(&mut encode_state, format, preserved)?,
+            vec![event]
+        );
+    }
+
+    let finish = engine.finish_stream(&mut encode_state, format)?;
+    assert_eq!(
+        finish
+            .iter()
+            .filter(|event| event["type"] == "message_stop")
+            .count(),
+        1
+    );
+    assert!(
+        finish.iter().all(|event| event["type"] != "message_delta"),
+        "the replayed terminal delta must not be synthesized a second time"
+    );
+    Ok(())
+}
+
+// Cross-format encoding discards provider-specific fields and uses normalized chunks.
+#[test]
+fn preserved_cross_format_event_uses_normalized_content() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::OpenAiChat, WireFormat::AnthropicMessages);
+    let event = json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion.chunk",
+        "model": "gpt-4o",
+        "system_fingerprint": "fp_provider_specific",
+        "choices": [{
+            "index": 0,
+            "delta": {"content": "Hi"},
+            "finish_reason": null
+        }]
+    });
+
+    let preserved = engine.decode_stream_event(&mut state, WireFormat::OpenAiChat, event)?;
+    let translated =
+        engine.encode_stream_event(&mut state, WireFormat::AnthropicMessages, preserved)?;
+
+    assert_eq!(translated[2]["delta"]["text"], "Hi");
+    assert!(
+        translated
+            .iter()
+            .all(|event| event.get("system_fingerprint").is_none())
+    );
+    Ok(())
+}
+
+// Verifies an OpenAI text delta opens the expected Anthropic message and content blocks.
+#[test]
+fn openai_chat_stream_event_translates_to_anthropic_message_events() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::OpenAiChat, WireFormat::AnthropicMessages);
+    let chunk = json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion.chunk",
+        "model": "gpt-4o",
+        "choices": [{
+            "index": 0,
+            "delta": {"content": "Hi"},
+            "finish_reason": null
+        }]
+    });
+
+    let events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiChat,
+        WireFormat::AnthropicMessages,
+        &chunk,
+    )?;
+
+    assert_eq!(events[0]["type"], "message_start");
+    assert_eq!(events[0]["message"]["model"], "gpt-4o");
+    assert_eq!(
+        events[1],
+        json!({
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "text", "text": ""}
+        })
+    );
+    assert_eq!(
+        events[2],
+        json!({
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "text_delta", "text": "Hi"}
+        })
+    );
+    Ok(())
+}
+
+// Verifies Anthropic usage and stop events become terminal OpenAI chunks.
+#[test]
+fn anthropic_stream_usage_and_stop_translate_to_openai_chunks() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::AnthropicMessages, WireFormat::OpenAiChat);
+    let start = json!({
+        "type": "message_start",
+        "message": {"id": "msg_1", "model": "claude", "role": "assistant", "content": []}
+    });
+    engine.translate_event(
+        &mut state,
+        WireFormat::AnthropicMessages,
+        WireFormat::OpenAiChat,
+        &start,
+    )?;
+
+    let usage = json!({
+        "type": "message_delta",
+        "delta": {"stop_reason": "end_turn"},
+        "usage": {"output_tokens": 42}
+    });
+    let events = engine.translate_event(
+        &mut state,
+        WireFormat::AnthropicMessages,
+        WireFormat::OpenAiChat,
+        &usage,
+    )?;
+
+    assert_eq!(events[0]["usage"]["completion_tokens"], 42);
+    assert_eq!(events[0]["choices"][0]["finish_reason"], "stop");
+    Ok(())
+}
+
+// Verifies Chat target streams expose the served model while retaining source identity.
+#[test]
+fn anthropic_to_openai_chat_uses_served_model_without_losing_source_model() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::AnthropicMessages, WireFormat::OpenAiChat);
+    state.target_model = Some("served-model".to_string());
+    let start = json!({
+        "type": "message_start",
+        "message": {
+            "id": "msg_1",
+            "model": "claude-upstream",
+            "role": "assistant",
+            "content": []
+        }
+    });
+    engine.translate_event(
+        &mut state,
+        WireFormat::AnthropicMessages,
+        WireFormat::OpenAiChat,
+        &start,
+    )?;
+
+    let delta = json!({
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {"type": "text_delta", "text": "hello"}
+    });
+    let events = engine.translate_event(
+        &mut state,
+        WireFormat::AnthropicMessages,
+        WireFormat::OpenAiChat,
+        &delta,
+    )?;
+
+    assert_eq!(state.model.as_deref(), Some("claude-upstream"));
+    assert_eq!(state.target_model.as_deref(), Some("served-model"));
+    assert_eq!(events[0]["model"], "served-model");
+    Ok(())
+}
+
+// Verifies Anthropic target streams expose the served model without losing source identity.
+#[test]
+fn responses_to_anthropic_uses_served_model_without_losing_source_model() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::OpenAiResponses, WireFormat::AnthropicMessages);
+    state.target_model = Some("served-model".to_string());
+    let created = json!({
+        "type": "response.created",
+        "response": {"id": "resp_1", "model": "responses-upstream"}
+    });
+
+    let events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiResponses,
+        WireFormat::AnthropicMessages,
+        &created,
+    )?;
+
+    assert_eq!(state.model.as_deref(), Some("responses-upstream"));
+    assert_eq!(state.target_model.as_deref(), Some("served-model"));
+    assert_eq!(events[0]["message"]["model"], "served-model");
+    Ok(())
+}
+
+// Verifies Responses target streams expose the served model while retaining source identity.
+#[test]
+fn openai_chat_to_responses_uses_served_model_without_losing_source_model() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::OpenAiChat, WireFormat::OpenAiResponses);
+    state.target_model = Some("served-model".to_string());
+    let chunk = json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion.chunk",
+        "model": "gpt-upstream",
+        "choices": [{
+            "index": 0,
+            "delta": {"content": "hello"},
+            "finish_reason": null
+        }]
+    });
+
+    let events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiChat,
+        WireFormat::OpenAiResponses,
+        &chunk,
+    )?;
+
+    assert_eq!(state.model.as_deref(), Some("gpt-upstream"));
+    assert_eq!(state.target_model.as_deref(), Some("served-model"));
+    assert_eq!(events[0]["response"]["model"], "served-model");
+    Ok(())
+}
+
+// Verifies OpenAI Chat finish emits a terminal chunk when the source closes without one.
+#[test]
+fn openai_chat_finish_synthesizes_terminal_chunk_after_incomplete_source() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state = StreamTranslationState::new(WireFormat::OpenAiChat, WireFormat::OpenAiChat);
+    let chunk = json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion.chunk",
+        "model": "gpt-4o",
+        "choices": [{
+            "index": 0,
+            "delta": {"content": "hello"},
+            "finish_reason": null
+        }]
+    });
+
+    let mut events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiChat,
+        WireFormat::OpenAiChat,
+        &chunk,
+    )?;
+    events.extend(engine.finish_stream(&mut state, WireFormat::OpenAiChat)?);
+
+    let Some(terminal) = events.last() else {
+        return Err("finish should emit a terminal OpenAI Chat chunk".into());
+    };
+    assert_eq!(terminal["choices"][0]["delta"], json!({}));
+    assert_eq!(terminal["choices"][0]["finish_reason"], "stop");
+    assert!(terminal.get("usage").is_none());
+    Ok(())
+}
+
+// Verifies provider usage arriving after finish remains visible to OpenAI clients.
+#[test]
+fn openai_chat_emits_usage_arriving_after_stop() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state = StreamTranslationState::new(WireFormat::OpenAiChat, WireFormat::OpenAiChat);
+    let stop = json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion.chunk",
+        "model": "gpt-4o",
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+    });
+    let events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiChat,
+        WireFormat::OpenAiChat,
+        &stop,
+    )?;
+    assert!(events[0].get("usage").is_none());
+
+    let usage = json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion.chunk",
+        "model": "gpt-4o",
+        "choices": [],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+    });
+    let events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiChat,
+        WireFormat::OpenAiChat,
+        &usage,
+    )?;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["choices"], json!([]));
+    assert_eq!(events[0]["usage"]["total_tokens"], 15);
+    Ok(())
+}
+
+// Verifies OpenAI Chat streaming usage preserves reasoning details for Responses clients.
+#[test]
+fn openai_chat_stream_reasoning_usage_translates_to_responses_usage_details() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::OpenAiChat, WireFormat::OpenAiResponses);
+    let usage = json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion.chunk",
+        "model": "gpt-reasoning",
+        "choices": [{
+            "index": 0,
+            "delta": {},
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+            "completion_tokens_details": {"reasoning_tokens": 3}
+        }
+    });
+
+    let mut events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiChat,
+        WireFormat::OpenAiResponses,
+        &usage,
+    )?;
+    events.extend(engine.finish_stream(&mut state, WireFormat::OpenAiResponses)?);
+
+    let Some(completed) = events
+        .iter()
+        .find(|event| event["type"] == "response.completed")
+    else {
+        return Err("expected final Responses completion event".into());
+    };
+    assert_eq!(
+        completed["response"]["usage"]["output_tokens_details"],
+        json!({"reasoning_tokens": 3})
+    );
+    Ok(())
+}
+
+// Verifies streamed cache usage reaches Responses clients in the standard details object.
+#[test]
+fn openai_chat_stream_cache_usage_translates_to_responses_usage_details() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::OpenAiChat, WireFormat::OpenAiResponses);
+    let usage = json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion.chunk",
+        "model": "gpt-cached",
+        "choices": [{
+            "index": 0,
+            "delta": {},
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 5,
+            "total_tokens": 105,
+            "prompt_tokens_details": {"cached_tokens": 80}
+        }
+    });
+
+    let mut events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiChat,
+        WireFormat::OpenAiResponses,
+        &usage,
+    )?;
+    events.extend(engine.finish_stream(&mut state, WireFormat::OpenAiResponses)?);
+
+    let Some(completed) = events
+        .iter()
+        .find(|event| event["type"] == "response.completed")
+    else {
+        return Err("expected final Responses completion event".into());
+    };
+    assert_eq!(completed["response"]["usage"]["input_tokens"], 100);
+    assert_eq!(
+        completed["response"]["usage"]["input_tokens_details"],
+        json!({"cached_tokens": 80})
+    );
+    Ok(())
+}
+
+// Verifies OpenRouter's cache-write field and the legacy alias normalize identically.
+#[test]
+fn openai_chat_stream_cache_write_usage_is_normalized() -> TestResult {
+    for cache_write_field in ["cache_write_tokens", "cache_creation_tokens"] {
+        let mut state = StreamTranslationState::new(WireFormat::OpenAiChat, WireFormat::OpenAiChat);
+        let mut event = json!({
+            "id": "chatcmpl-test",
+            "object": "chat.completion.chunk",
+            "model": "gpt-cached",
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 5,
+                "total_tokens": 105,
+                "prompt_tokens_details": {"cached_tokens": 70}
+            }
+        });
+        event["usage"]["prompt_tokens_details"][cache_write_field] = json!(10);
+
+        let chunks = decode_stream_event(&mut state, WireFormat::OpenAiChat, &event);
+        let Some(usage) = chunks.iter().find_map(|chunk| match chunk {
+            LlmResponseChunk::Usage(usage) => Some(usage),
+            _ => None,
+        }) else {
+            return Err(format!("expected usage chunk for {cache_write_field}").into());
+        };
+
+        assert_eq!(usage.input_tokens, Some(20));
+        assert_eq!(usage.cached_input_tokens(), Some(70));
+        assert_eq!(usage.cache_creation_input_tokens(), Some(10));
+        assert_eq!(usage.output_tokens, Some(5));
+    }
+    Ok(())
+}
+
+// Verifies the streamed total-token fallback keeps cached tokens when upstream omits total_tokens.
+#[test]
+fn responses_stream_usage_without_total_keeps_cached_tokens_in_total() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::OpenAiResponses, WireFormat::OpenAiChat);
+    let created = json!({
+        "type": "response.created",
+        "response": {"id": "resp_1", "model": "gpt-cached"}
+    });
+    engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiResponses,
+        WireFormat::OpenAiChat,
+        &created,
+    )?;
+
+    // No total_tokens field: the codec must recompute it from the aggregate input.
+    let completed = json!({
+        "type": "response.completed",
+        "response": {
+            "id": "resp_1",
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 5,
+                "input_tokens_details": {"cached_tokens": 80}
+            }
+        }
+    });
+    let mut events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiResponses,
+        WireFormat::OpenAiChat,
+        &completed,
+    )?;
+    events.extend(engine.finish_stream(&mut state, WireFormat::OpenAiChat)?);
+
+    let Some(usage) = events
+        .iter()
+        .find_map(|event| event.get("usage").filter(|usage| !usage.is_null()))
+    else {
+        return Err("expected a terminal OpenAI chunk carrying usage".into());
+    };
+    assert_eq!(usage["prompt_tokens"], 100);
+    assert_eq!(usage["total_tokens"], 105);
+    assert_eq!(usage["prompt_tokens_details"]["cached_tokens"], 80);
+    Ok(())
+}
+
+// Verifies Responses text deltas become OpenAI Chat content chunks.
+#[test]
+fn responses_stream_delta_translates_to_openai_chat_chunk() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::OpenAiResponses, WireFormat::OpenAiChat);
+    let created = json!({
+        "type": "response.created",
+        "response": {"id": "resp_1", "model": "gpt-4o"}
+    });
+    engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiResponses,
+        WireFormat::OpenAiChat,
+        &created,
+    )?;
+
+    let delta = json!({
+        "type": "response.output_text.delta",
+        "output_index": 0,
+        "delta": "hello"
+    });
+    let events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiResponses,
+        WireFormat::OpenAiChat,
+        &delta,
+    )?;
+
+    assert_eq!(events[0]["model"], "gpt-4o");
+    assert_eq!(events[0]["choices"][0]["delta"]["content"], "hello");
+    Ok(())
+}
+
+// Verifies OpenAI-compatible reasoning deltas become Anthropic thinking, not text content.
+#[test]
+fn openai_chat_reasoning_stream_fields_do_not_become_anthropic_text() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::OpenAiChat, WireFormat::AnthropicMessages);
+    let chunk = json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion.chunk",
+        "model": "nvidia/nemotron",
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "reasoning": "private reasoning",
+                "reasoning_content": "private reasoning content"
+            },
+            "finish_reason": null
+        }]
+    });
+
+    let mut events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiChat,
+        WireFormat::AnthropicMessages,
+        &chunk,
+    )?;
+    events.extend(engine.finish_stream(&mut state, WireFormat::AnthropicMessages)?);
+
+    let serialized = serde_json::to_string(&events)?;
+    assert!(serialized.contains("private reasoning"));
+    assert!(serialized.contains("private reasoning content"));
+    assert!(!serialized.contains("reasoning_content"));
+    assert!(events.iter().any(|event| {
+        event["type"] == "content_block_start"
+            && event["content_block"]["type"] == "thinking"
+            && event["content_block"]["signature"] == ""
+    }));
+    assert!(events.iter().any(|event| {
+        event["type"] == "content_block_delta"
+            && event["delta"]["type"] == "thinking_delta"
+            && event["delta"]["thinking"] == "private reasoning content"
+    }));
+    assert!(events.iter().any(|event| {
+        event["type"] == "content_block_delta"
+            && event["delta"]["type"] == "signature_delta"
+            && event["delta"]["signature"] == ""
+    }));
+    assert!(!events.iter().any(|event| {
+        event["type"] == "content_block_delta"
+            && event["delta"]["type"] == "text_delta"
+            && event["delta"]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("private reasoning"))
+    }));
+    Ok(())
+}
+
+#[test]
+fn openai_chat_stream_round_trips_reasoning_details() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state = StreamTranslationState::new(WireFormat::OpenAiChat, WireFormat::OpenAiChat);
+    let details = text_and_encrypted_reasoning_details();
+    let chunk = json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion.chunk",
+        "model": REASONING_MODEL,
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "reasoning": "fallback text",
+                "reasoning_details": details
+            },
+            "finish_reason": null
+        }]
+    });
+
+    let events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiChat,
+        WireFormat::OpenAiChat,
+        &chunk,
+    )?;
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0]["choices"][0]["delta"]["reasoning_details"],
+        details
+    );
+    assert!(events[0]["choices"][0]["delta"].get("reasoning").is_none());
+    Ok(())
+}
+
+#[test]
+fn openai_chat_stream_retains_encrypted_details_and_fallback() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state = StreamTranslationState::new(WireFormat::OpenAiChat, WireFormat::OpenAiChat);
+    let details = json!([{
+        "type": "reasoning.encrypted",
+        "data": "opaque-encrypted-reasoning"
+    }]);
+    let chunk = json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion.chunk",
+        "model": REASONING_MODEL,
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "reasoning_content": "",
+                "reasoning": "fallback text",
+                "reasoning_details": details
+            },
+            "finish_reason": null
+        }]
+    });
+
+    let events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiChat,
+        WireFormat::OpenAiChat,
+        &chunk,
+    )?;
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0]["choices"][0]["delta"]["reasoning_details"],
+        details
+    );
+    assert_eq!(
+        events[0]["choices"][0]["delta"]["reasoning"],
+        "fallback text"
+    );
+    Ok(())
+}
+
+#[test]
+fn openai_chat_stream_uses_summary_when_detail_text_is_empty() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::OpenAiChat, WireFormat::AnthropicMessages);
+    let chunk = json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion.chunk",
+        "model": REASONING_MODEL,
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "reasoning_details": [{
+                    "type": "reasoning.summary",
+                    "text": "",
+                    "summary": "usable summary"
+                }]
+            },
+            "finish_reason": null
+        }]
+    });
+
+    let events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiChat,
+        WireFormat::AnthropicMessages,
+        &chunk,
+    )?;
+
+    assert!(events.iter().any(|event| {
+        event["type"] == "content_block_delta"
+            && event["delta"]["type"] == "thinking_delta"
+            && event["delta"]["thinking"] == "usable summary"
+    }));
+    Ok(())
+}
+
+// Verifies Anthropic thinking deltas become OpenAI reasoning_content, not content.
+#[test]
+fn anthropic_thinking_stream_deltas_do_not_become_openai_chat_content() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::AnthropicMessages, WireFormat::OpenAiChat);
+    let start = json!({
+        "type": "message_start",
+        "message": {"id": "msg_1", "model": "claude", "role": "assistant", "content": []}
+    });
+    let thinking_start = json!({
+        "type": "content_block_start",
+        "index": 0,
+        "content_block": {"type": "thinking", "thinking": ""}
+    });
+    let thinking_delta = json!({
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {"type": "thinking_delta", "thinking": "private chain of thought"}
+    });
+    let signature_delta = json!({
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {"type": "signature_delta", "signature": "opaque-signature"}
+    });
+
+    let mut events = Vec::new();
+    events.extend(engine.translate_event(
+        &mut state,
+        WireFormat::AnthropicMessages,
+        WireFormat::OpenAiChat,
+        &start,
+    )?);
+    events.extend(engine.translate_event(
+        &mut state,
+        WireFormat::AnthropicMessages,
+        WireFormat::OpenAiChat,
+        &thinking_start,
+    )?);
+    events.extend(engine.translate_event(
+        &mut state,
+        WireFormat::AnthropicMessages,
+        WireFormat::OpenAiChat,
+        &thinking_delta,
+    )?);
+    events.extend(engine.translate_event(
+        &mut state,
+        WireFormat::AnthropicMessages,
+        WireFormat::OpenAiChat,
+        &signature_delta,
+    )?);
+
+    let serialized = serde_json::to_string(&events)?;
+    assert!(serialized.contains("private chain of thought"));
+    assert!(!serialized.contains("opaque-signature"));
+    assert!(events.iter().any(|event| {
+        event["choices"][0]["delta"]["reasoning_content"] == "private chain of thought"
+    }));
+    assert!(
+        !events
+            .iter()
+            .any(|event| { event["choices"][0]["delta"]["content"] == "private chain of thought" })
+    );
+    Ok(())
+}
+
+// A real Anthropic stream carries its stop reason on `message_delta` and then always
+// sends a reasonless `message_stop`. Decoding both and folding the chunks must preserve
+// the provider reason (here `max_tokens`) — the terminal `message_stop` must not emit a
+// second, reasonless `MessageStop` that the accumulator would fold to `EndTurn`.
+#[test]
+fn anthropic_message_stop_does_not_overwrite_max_tokens_stop_reason() -> TestResult {
+    let mut state =
+        StreamTranslationState::new(WireFormat::AnthropicMessages, WireFormat::AnthropicMessages);
+    let events = vec![
+        json!({"type": "message_start", "message": {"id": "msg_1", "model": "claude", "usage": {"input_tokens": 3}}}),
+        json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+        json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Hi"}}),
+        json!({"type": "message_delta", "delta": {"stop_reason": "max_tokens"}, "usage": {"output_tokens": 5}}),
+        json!({"type": "message_stop"}),
+    ];
+
+    let mut accumulator = ResponseAccumulator::new();
+    for event in &events {
+        for chunk in decode_stream_event(&mut state, WireFormat::AnthropicMessages, event) {
+            accumulator.push(chunk);
+        }
+    }
+    let aggregate = accumulator.finish();
+
+    assert_eq!(
+        aggregate.outputs[0].stop_reason,
+        Some(StopReason::MaxTokens),
+        "the reasonless message_stop must not overwrite the max_tokens stop reason"
+    );
+    Ok(())
+}
+
+// Equivalent buffered and streamed Responses results must normalize to the same output.
+#[test]
+fn responses_buffered_and_streamed_outputs_match() -> TestResult {
+    let engine = TranslationEngine::default();
+    let buffered = engine
+        .decode_response(
+            WireFormat::OpenAiResponses,
+            &json!({
+                "id": "resp_1",
+                "object": "response",
+                "model": "gpt-reasoning",
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "reasoning",
+                        "summary": [{"type": "summary_text", "text": "private reasoning"}]
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Visible answer"}]
+                    }
+                ]
+            }),
+            &Default::default(),
+        )?
+        .response;
+
+    let events = [
+        json!({
+            "type": "response.created",
+            "response": {"id": "resp_1", "model": "gpt-reasoning"}
+        }),
+        json!({
+            "type": "response.reasoning_summary_text.delta",
+            "output_index": 0,
+            "delta": "private reasoning"
+        }),
+        json!({
+            "type": "response.output_text.delta",
+            "output_index": 1,
+            "delta": "Visible answer"
+        }),
+        json!({"type": "response.completed", "response": {}}),
+    ];
+    let mut state =
+        StreamTranslationState::new(WireFormat::OpenAiResponses, WireFormat::OpenAiResponses);
+    let mut accumulator = ResponseAccumulator::new();
+    for event in &events {
+        for chunk in decode_stream_event(&mut state, WireFormat::OpenAiResponses, event) {
+            accumulator.push(chunk);
+        }
+    }
+
+    assert_eq!(buffered.outputs, accumulator.finish().outputs);
+    Ok(())
+}
+
+// An OpenAI-shaped error frame carries no `choices`, so it must decode to a stream error
+// instead of a bare message start that silently drops the upstream message.
+#[test]
+fn openai_chat_error_frame_decodes_to_stream_error() -> TestResult {
+    let mut state = StreamTranslationState::new(WireFormat::OpenAiChat, WireFormat::OpenAiChat);
+    let event = json!({"error": {"message": "upstream exploded", "type": "server_error"}});
+
+    let chunks = decode_stream_event(&mut state, WireFormat::OpenAiChat, &event);
+
+    assert_eq!(chunks.len(), 1);
+    match &chunks[0] {
+        LlmResponseChunk::StreamError { message } => assert_eq!(message, "upstream exploded"),
+        other => return Err(format!("expected StreamError, got {other:?}").into()),
+    }
+    Ok(())
+}
+
+// Verifies the streaming encoder matches the buffered one: both Responses usage detail objects
+// are present even when the upstream reports no cache or reasoning breakdown.
+#[test]
+fn openai_chat_stream_usage_without_breakdowns_still_emits_responses_usage_details() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::OpenAiChat, WireFormat::OpenAiResponses);
+    let usage = json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion.chunk",
+        "model": "plain-model",
+        "choices": [{
+            "index": 0,
+            "delta": {},
+            "finish_reason": "stop"
+        }],
+        "usage": {"prompt_tokens": 41, "completion_tokens": 3, "total_tokens": 44}
+    });
+
+    let mut events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiChat,
+        WireFormat::OpenAiResponses,
+        &usage,
+    )?;
+    events.extend(engine.finish_stream(&mut state, WireFormat::OpenAiResponses)?);
+
+    let Some(completed) = events
+        .iter()
+        .find(|event| event["type"] == "response.completed")
+    else {
+        return Err("expected final Responses completion event".into());
+    };
+    assert_eq!(
+        completed["response"]["usage"]["input_tokens_details"],
+        json!({"cached_tokens": 0})
+    );
+    assert_eq!(
+        completed["response"]["usage"]["output_tokens_details"],
+        json!({"reasoning_tokens": 0})
+    );
+    Ok(())
+}
+
+// Verifies a streamed token-limit stop terminates with response.incomplete.
+#[test]
+fn openai_chat_length_finish_translates_to_responses_incomplete_event() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::OpenAiChat, WireFormat::OpenAiResponses);
+    let chunk = json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion.chunk",
+        "model": "gpt-4o",
+        "choices": [{
+            "index": 0,
+            "delta": {"content": "Half an ans"},
+            "finish_reason": "length"
+        }]
+    });
+
+    let mut events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiChat,
+        WireFormat::OpenAiResponses,
+        &chunk,
+    )?;
+    events.extend(engine.finish_stream(&mut state, WireFormat::OpenAiResponses)?);
+
+    let Some(terminal) = events.last() else {
+        return Err("finish should emit a terminal Responses event".into());
+    };
+    assert_eq!(terminal["type"], "response.incomplete");
+    assert_eq!(terminal["response"]["status"], "incomplete");
+    assert_eq!(
+        terminal["response"]["incomplete_details"],
+        json!({"reason": "max_output_tokens"})
+    );
+    assert_eq!(terminal["response"]["output"][0]["status"], "incomplete");
+    Ok(())
+}
+
+// Verifies an Anthropic-vocabulary token-limit stop also terminates with response.incomplete.
+#[test]
+fn anthropic_max_tokens_stop_translates_to_responses_incomplete_event() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::AnthropicMessages, WireFormat::OpenAiResponses);
+    let delta = json!({
+        "type": "message_delta",
+        "delta": {"stop_reason": "max_tokens"},
+        "usage": {"output_tokens": 1}
+    });
+
+    let mut events = engine.translate_event(
+        &mut state,
+        WireFormat::AnthropicMessages,
+        WireFormat::OpenAiResponses,
+        &delta,
+    )?;
+    events.extend(engine.finish_stream(&mut state, WireFormat::OpenAiResponses)?);
+
+    let Some(terminal) = events.last() else {
+        return Err("finish should emit a terminal Responses event".into());
+    };
+    assert_eq!(terminal["type"], "response.incomplete");
+    assert_eq!(
+        terminal["response"]["incomplete_details"],
+        json!({"reason": "max_output_tokens"})
+    );
+    Ok(())
+}
+
+// Verifies a streamed response.incomplete from a Responses upstream reaches a Chat client.
+#[test]
+fn responses_incomplete_event_translates_to_chat_length_finish() -> TestResult {
+    let engine = TranslationEngine::default();
+    let mut state =
+        StreamTranslationState::new(WireFormat::OpenAiResponses, WireFormat::OpenAiChat);
+    let incomplete = json!({
+        "type": "response.incomplete",
+        "response": {"status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"}}
+    });
+
+    let mut events = engine.translate_event(
+        &mut state,
+        WireFormat::OpenAiResponses,
+        WireFormat::OpenAiChat,
+        &incomplete,
+    )?;
+    events.extend(engine.finish_stream(&mut state, WireFormat::OpenAiChat)?);
+
+    let Some(terminal) = events.last() else {
+        return Err("finish should emit a terminal Chat chunk".into());
+    };
+    assert_eq!(terminal["choices"][0]["finish_reason"], "length");
+    Ok(())
+}

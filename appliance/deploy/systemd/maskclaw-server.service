@@ -1,0 +1,15 @@
+[Unit]
+Description=MaskClaw privacy proxy (switchyard-server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/maskclaw/engine.env
+ExecStart=/opt/maskclaw/bin/switchyard-server --config /etc/maskclaw/routes.toml --maskclaw-config /etc/maskclaw/maskclaw.toml --host 0.0.0.0 --port 4000 --routing-log-file /var/lib/maskclaw/routing.jsonl
+Restart=on-failure
+RestartSec=2
+WorkingDirectory=/opt/maskclaw
+
+[Install]
+WantedBy=multi-user.target

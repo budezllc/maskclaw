@@ -1,0 +1,9 @@
+node_modules
+dist
+/www
+*.log
+.DS_Store
+__pycache__
+*.pyc
+opt-payload
+deploy/bin/switchyard-server

@@ -1,0 +1,6 @@
+# MaskClaw engine pin
+#
+# Relative to appliance/. The engine lives in this same GitHub repo.
+ENGINE_PATH=../engine
+ENGINE_BRANCH=feature/maskclaw-privacy-layer
+ENGINE_PIN=in-tree

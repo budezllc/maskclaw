@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Budez LLC. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "maskclaw"
+version = "0.1.0"
+description = "Private data scrubbing layer for Switchyard"
+authors = ["Budez LLC"]
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.96.1"
+publish = false
+readme = "README.md"
+
+[dependencies]
+aho-corasick = "1"
+async-stream.workspace = true
+futures.workspace = true
+hex = "0.4"
+hmac = "0.12"
+parking_lot.workspace = true
+rand.workspace = true
+regex = "1"
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+switchyard-protocol.workspace = true
+thiserror.workspace = true
+toml = "1.1"
+tracing.workspace = true
+
+[dev-dependencies]
+futures.workspace = true
+serde_json.workspace = true
+switchyard-protocol.workspace = true
+tokio.workspace = true

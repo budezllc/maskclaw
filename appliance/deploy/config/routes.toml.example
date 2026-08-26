@@ -1,0 +1,16 @@
+# Example only. Point at your local Unsloth or cloud client after first boot.
+schema_version = 1
+
+[llm_clients.local]
+format = "openai_chat"
+base_url = "http://127.0.0.1:8888/v1"
+max_retries = 0
+
+[targets.local]
+id = "model/local"
+llm_client = "local"
+
+[routes.maskclaw]
+id = "maskclaw"
+type = "passthrough"
+target = "local"

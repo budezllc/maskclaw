@@ -1,0 +1,16 @@
+[Unit]
+Description=MaskClaw appliance hostd
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=MASKCLAW_HOSTD_BIND=127.0.0.1
+Environment=MASKCLAW_HOSTD_PORT=8787
+Environment=MASKCLAW_CONFIG_DIR=/etc/maskclaw
+ExecStart=/usr/bin/python3 /opt/maskclaw/hostd/hostd.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

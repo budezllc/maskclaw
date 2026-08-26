@@ -1,0 +1,23 @@
+schema_version = 1
+
+[llm_clients.unsloth]
+format = "openai_chat"
+base_url = "http://127.0.0.1:8888/v1"
+api_key_env = "UNSLOTH_API_KEY"
+
+[targets.unsloth_target]
+id = "unsloth/gemma-4-E4B-it-GGUF"
+llm_client = "unsloth"
+extra_body = { chat_template_kwargs = { enable_thinking = false } }
+
+[routes.smart]
+id = "switchyard"
+type = "passthrough"
+target = "unsloth_target"
+tool_calling = true
+
+[routes.local]
+id = "unsloth-local"
+type = "passthrough"
+target = "unsloth_target"
+tool_calling = true

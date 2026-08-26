@@ -1,0 +1,49 @@
+schema_version = 1
+
+[llm_clients.minimax]
+format = "openai_chat"
+base_url = "https://api.minimax.io/v1"
+api_key_env = "MINIMAX_API_KEY"
+
+[llm_clients.unsloth]
+format = "openai_chat"
+base_url = "http://127.0.0.1:8888/v1"
+api_key_env = "UNSLOTH_API_KEY"
+
+[targets.strong]
+id = "MiniMax-M3"
+llm_client = "minimax"
+
+[targets.weak]
+id = "unsloth/gemma-4-E4B-it-GGUF"
+llm_client = "unsloth"
+extra_body = { chat_template_kwargs = { enable_thinking = false } }
+
+[routes.smart]
+id = "switchyard"
+type = "llm_classifier"
+mode = "capability"
+classifier_target = "weak"
+strong_target = "strong"
+weak_target = "weak"
+base_threshold = 0.5
+threshold_step = 0.1
+session_affinity = true
+message_hash_fallback = true
+context_window = 1000000
+tool_calling = true
+reasoning = true
+
+[routes.minimax]
+id = "minimax-m3"
+type = "passthrough"
+target = "strong"
+context_window = 1000000
+tool_calling = true
+reasoning = true
+
+[routes.local]
+id = "unsloth-local"
+type = "passthrough"
+target = "weak"
+tool_calling = true

@@ -1,0 +1,33 @@
+#cloud-config
+
+hostname: maskclaw
+manage_etc_hosts: true
+ssh_pwauth: true
+
+users:
+  - name: admin
+    gecos: MaskClaw
+    primary_group: users
+    groups: [adm, dialout, cdrom, sudo, audio, video, plugdev, netdev, gpio, i2c, spi]
+    shell: /bin/bash
+    lock_passwd: false
+    plain_text_passwd: maskclaw
+    sudo: ALL=(ALL) ALL
+
+write_files:
+  - path: /etc/motd
+    permissions: "0644"
+    content: |
+      MaskClaw appliance
+      Factory login: SSH will force a password change on first login.
+      After that you can change it anytime with:  passwd
+
+  - path: /etc/profile.d/maskclaw-passwd-hint.sh
+    permissions: "0644"
+    content: |
+      if [ -n "${PS1-}" ] && [ "$(id -un)" != "root" ]; then
+        echo "Change your password anytime with:  passwd"
+      fi
+
+runcmd:
+  - [ sh, -c, "for i in 1 2 3 4 5 6 7 8 9 10 11 12; do ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 && break; sleep 5; done; sh /boot/firmware/maskclaw-deploy/install.sh /boot/firmware/maskclaw-deploy" ]

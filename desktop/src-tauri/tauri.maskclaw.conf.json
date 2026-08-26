@@ -1,0 +1,16 @@
+{
+  "productName": "MASKCLAW DESKTOP",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "MASKCLAW DESKTOP",
+        "width": 1100,
+        "height": 760,
+        "resizable": true,
+        "backgroundColor": "#111111",
+        "scrollBarStyle": "fluentOverlay"
+      }
+    ]
+  }
+}

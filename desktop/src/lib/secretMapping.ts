@@ -1,0 +1,88 @@
+import type { CloudProvider, LocalKind, SetupForm } from "./setupTypes";
+
+export const SERVICE_NAME = "com.switchyard.app";
+
+export function cloudApiKeyEnv(provider: CloudProvider): string {
+  switch (provider) {
+    case "minimax":
+      return "MINIMAX_API_KEY";
+    case "openrouter":
+      return "OPENROUTER_API_KEY";
+    case "openai":
+      return "OPENAI_API_KEY";
+    case "anthropic":
+      return "ANTHROPIC_API_KEY";
+    case "custom":
+      return "CUSTOM_API_KEY";
+  }
+}
+
+export function localPlaceholder(kind: LocalKind): string {
+  switch (kind) {
+    case "unsloth":
+      return "sk-unsloth-local";
+    case "lmstudio":
+      return "lm-studio";
+    case "gemma":
+      return "ollama";
+  }
+}
+
+export function localApiKeyEnv(kind: LocalKind): string {
+  switch (kind) {
+    case "unsloth":
+      return "UNSLOTH_API_KEY";
+    case "lmstudio":
+      return "LM_STUDIO_API_KEY";
+    case "gemma":
+      return "OLLAMA_API_KEY";
+  }
+}
+
+export interface SecretBinding {
+  envName: string;
+  value: string;
+}
+
+/** Keys that must be injected into the sidecar environment. Never written to TOML. */
+export function secretsFromSetup(form: SetupForm): SecretBinding[] {
+  const out: SecretBinding[] = [];
+  if (form.cloud.enabled && form.cloud.apiKey.trim()) {
+    out.push({
+      envName: cloudApiKeyEnv(form.cloud.provider),
+      value: form.cloud.apiKey.trim(),
+    });
+  }
+  for (const kind of ["unsloth", "lmstudio", "gemma"] as LocalKind[]) {
+    const local = form.locals[kind];
+    if (local.enabled) {
+      out.push({
+        envName: localApiKeyEnv(kind),
+        value: local.apiKey.trim() || localPlaceholder(kind),
+      });
+    }
+  }
+  return out;
+}
+
+export function sidecarEnvFromSecrets(
+  secrets: SecretBinding[],
+  telemetryOptIn: boolean,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const secret of secrets) {
+    env[secret.envName] = secret.value;
+  }
+  if (!telemetryOptIn) {
+    env.SWITCHYARD_TELEMETRY_OPT_OUT = "1";
+  }
+  return env;
+}
+
+export function assertNoSecretsInToml(toml: string, secrets: SecretBinding[]): void {
+  for (const secret of secrets) {
+    if (secret.value && toml.includes(secret.value)) {
+      throw new Error(`secret value for ${secret.envName} leaked into TOML`);
+    }
+  }
+}

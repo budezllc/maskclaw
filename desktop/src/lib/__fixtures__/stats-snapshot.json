@@ -1,0 +1,55 @@
+{
+  "total_requests": 12,
+  "total_errors": 1,
+  "by_model": {
+    "switchyard": {
+      "calls": 10,
+      "errors": 1,
+      "tokens": {
+        "prompt_tokens": 1000,
+        "completion_tokens": 200,
+        "cached_tokens": 50,
+        "cache_creation_tokens": 10,
+        "cacheable_prompt_tokens": 800,
+        "reasoning_tokens": 40
+      },
+      "latency_ms": [12.5, 30]
+    },
+    "minimax-m3": {
+      "calls": 2,
+      "errors": 0,
+      "tokens": {
+        "prompt_tokens": 80,
+        "completion_tokens": 20,
+        "cached_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cacheable_prompt_tokens": 80,
+        "reasoning_tokens": 0
+      },
+      "latency_ms": [400]
+    }
+  },
+  "by_classifier": {
+    "unsloth/gemma-4-E4B-it-GGUF": {
+      "calls": 10,
+      "errors": 0,
+      "tokens": {
+        "prompt_tokens": 300,
+        "completion_tokens": 12,
+        "cached_tokens": 0,
+        "cache_creation_tokens": 0,
+        "cacheable_prompt_tokens": 300,
+        "reasoning_tokens": 0
+      }
+    }
+  },
+  "classifier_requests": 10,
+  "classifier_errors": 0,
+  "routing_overhead": { "count": 10, "sum_ms": 45.5 },
+  "routing_fallbacks": { "count": 1 },
+  "algorithm_stats": {
+    "stage_router": {
+      "decisions": 0
+    }
+  }
+}

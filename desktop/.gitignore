@@ -1,0 +1,11 @@
+node_modules
+dist
+.sidecar-stage
+src-tauri/target
+src-tauri/gen
+src-tauri/binaries/*.exe
+src-tauri/binaries/*.dylib
+src-tauri/binaries/switchyard-server-*
+src-tauri/binaries/sidecar-flavor.txt
+src-tauri/engine-flavor.txt
+!src-tauri/binaries/.gitkeep

@@ -1,0 +1,88 @@
+{
+	admin off
+	# Keep our explicit :80 /v1+/health handlers; Caddy's default HTTPS redirects
+	# would otherwise steal those routes when named TLS hosts are present.
+	auto_https disable_redirects
+	servers {
+		protocols h1 h2
+	}
+}
+
+:80 {
+	handle /v1/* {
+		reverse_proxy 127.0.0.1:4000
+	}
+
+	handle /health {
+		reverse_proxy 127.0.0.1:4000
+	}
+
+	# Public CA download without HTTPS so PCs can trust the box before the green lock.
+	handle /host/ca.crt {
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	handle {
+		redir https://{host}{uri} permanent
+	}
+}
+
+# Named hosts (not bare :443): Caddy 2.6 internal TLS cannot issue certs for :443-only sites.
+maskclaw.local, localhost, 127.0.0.1 {
+	tls internal
+	root * /opt/maskclaw/www
+	encode gzip
+
+	handle /host/login {
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	handle /host/logout {
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	handle /host/session {
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	handle /host/health {
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	handle /host/password {
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	handle /host/ca.crt {
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	handle /host/* {
+		forward_auth 127.0.0.1:8787 {
+			uri /host/session
+		}
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	handle /control/* {
+		forward_auth 127.0.0.1:8787 {
+			uri /host/session
+		}
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	# Dashboard polls these over HTTPS (same origin as the UI).
+	handle /v1/* {
+		reverse_proxy 127.0.0.1:4000
+	}
+
+	handle /health {
+		reverse_proxy 127.0.0.1:4000
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}
+

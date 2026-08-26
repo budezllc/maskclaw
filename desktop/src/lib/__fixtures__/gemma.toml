@@ -1,0 +1,20 @@
+schema_version = 1
+
+[llm_clients.gemma]
+format = "openai_chat"
+base_url = "http://127.0.0.1:11434/v1"
+api_key_env = "OLLAMA_API_KEY"
+
+[targets.gemma_target]
+id = "gemma3"
+llm_client = "gemma"
+
+[routes.smart]
+id = "switchyard"
+type = "passthrough"
+target = "gemma_target"
+
+[routes.gemma]
+id = "gemma-local"
+type = "passthrough"
+target = "gemma_target"

@@ -1,0 +1,16 @@
+# pi-gen overlay for a sellable MaskClaw image.
+# Bake on Linux/Docker only (not this Windows PC):
+#   git clone https://github.com/RPi-Distro/pi-gen.git
+#   copy this directory's config into pi-gen and add stage2 overlay files from ../deploy
+#
+# Do not run pi-gen until desk Pi bring-up with deploy/install.sh works.
+
+IMG_NAME=maskclaw
+RELEASE=bookworm
+DEPLOY_ZIP=0
+LOCALE_DEFAULT=en_US.UTF-8
+TARGET_HOSTNAME=maskclaw
+KEYBOARD_KEYMAP=us
+TIMEZONE_DEFAULT=America/Los_Angeles
+ENABLE_SSH=1
+STAGE_LIST="stage0 stage1 stage2"

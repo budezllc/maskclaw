@@ -1,0 +1,4 @@
+enabled = true
+session_ttl_secs = 900
+force_local = "never"
+local_route_id = "maskclaw"
