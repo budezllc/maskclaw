@@ -18,7 +18,7 @@ import { snapshotFromInvokeError } from "../../lib/engineControls";
 import { POLL_INTERVAL_MS, POLL_TIMEOUT_MS, createPollGate, runPollTick, withTimeout } from "../../lib/enginePoll";
 import { formatCount, formatMs, lastRequestHop } from "../../lib/formatStats";
 import { MASKCLAW_NAV_ITEMS, type MaskclawPane } from "../../lib/maskclawNav";
-import { adaptMaskclawStats, type MaskclawStatsView } from "../../lib/maskclawStatsAdapter";
+import { adaptMaskclawStats, forceLocalRouteLabel, localRouteIdsInToml, type MaskclawStatsView } from "../../lib/maskclawStatsAdapter";
 import { defaultModelFromPayload, parseRoutes, type RouteRow } from "../../lib/parseRoutes";
 import { adaptStats, routeTargetAliases, trackStatsByRoute, type StatsViewModel } from "../../lib/statsAdapter";
 import { applyAppearance, nextAppearance, persistAppearance, themeActionWord, type Appearance } from "../../lib/theme";
@@ -263,7 +263,15 @@ function HomePage({
   );
 }
 
-function MaskedPage({ maskclaw }: { maskclaw: MaskclawStatsView | null }) {
+function MaskedPage({
+  maskclaw,
+  routesToml,
+  routeIds,
+}: {
+  maskclaw: MaskclawStatsView | null;
+  routesToml: string;
+  routeIds: string[];
+}) {
   if (!maskclaw) {
     return (
       <div className="mc-page">
@@ -280,6 +288,8 @@ function MaskedPage({ maskclaw }: { maskclaw: MaskclawStatsView | null }) {
       </div>
     );
   }
+  const liveIds = [...new Set([...routeIds, ...localRouteIdsInToml(routesToml)])];
+  const localRoute = forceLocalRouteLabel(maskclaw.forceLocal, maskclaw.localRouteId, liveIds);
   return (
     <div className="mc-page">
       <h1 className="mc-h1">MASKED</h1>
@@ -319,7 +329,7 @@ function MaskedPage({ maskclaw }: { maskclaw: MaskclawStatsView | null }) {
       </section>
       <div className="mc-chips">
         <span className="mc-chip">force_local {maskclaw.forceLocal}</span>
-        {maskclaw.localRouteId ? <span className="mc-chip">local route {maskclaw.localRouteId}</span> : null}
+        {localRoute ? <span className="mc-chip">local route {localRoute}</span> : null}
         <span className="mc-chip">ttl {maskclaw.sessionTtlSecs}s</span>
       </div>
     </div>
@@ -469,7 +479,13 @@ export function MaskClawApp({ snap, pane, onPane, onChange, refresh, theme, onTh
             }}
           />
         )}
-        {pane === "mask" && <MaskedPage maskclaw={maskclaw} />}
+        {pane === "mask" && (
+          <MaskedPage
+            maskclaw={maskclaw}
+            routesToml={snap.config_toml}
+            routeIds={routes.map((route) => route.id)}
+          />
+        )}
         {pane === "models" && (
           <MaskClawModels configToml={snap.config_toml} onChange={onChange} />
         )}

@@ -1,4 +1,4 @@
-import { extractBaseUrls, tailJsonl, tomlContainsLiteralSecret } from "./tomlEdit";
+import { extractBaseUrls, syncMaskclawLocalRoute, tailJsonl, tomlContainsLiteralSecret } from "./tomlEdit";
 
 export const ENGINE_LISTEN_URL = "http://127.0.0.1:4000";
 
@@ -96,6 +96,11 @@ export async function handleControl(
         return jsonError(400, "Do not put secrets in routes.toml. Use api_key_env.");
       }
       await io.writeRoutes(toml);
+      const sidecar = await io.readMaskclaw();
+      const synced = syncMaskclawLocalRoute(sidecar, toml);
+      if (synced !== sidecar) {
+        await io.writeMaskclaw(synced);
+      }
       await io.restartEngine();
       return { status: 200, json: await snapshot(io) };
     }

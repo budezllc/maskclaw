@@ -42,6 +42,28 @@ function num(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+const LOCAL_ROUTE_IDS = ["unsloth-local", "lmstudio-local", "gemma-local"];
+
+export function localRouteIdsInToml(toml: string): string[] {
+  return LOCAL_ROUTE_IDS.filter((id) => new RegExp(`(?:^|\\n)\\s*id\\s*=\\s*"${id}"`, "m").test(toml));
+}
+
+/** Hide leftover maskclaw.toml pins the Models screen does not control. */
+export function forceLocalRouteLabel(
+  forceLocal: string,
+  localRouteId: string,
+  liveRouteIds?: string[],
+): string {
+  const id = localRouteId.trim();
+  if (!id || forceLocal === "never") {
+    return "";
+  }
+  if (liveRouteIds && !liveRouteIds.includes(id)) {
+    return "";
+  }
+  return id;
+}
+
 export function kindPlates(byKind: Record<string, number> | undefined): [string, number][] {
   if (!byKind) {
     return [];

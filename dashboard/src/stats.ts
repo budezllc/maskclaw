@@ -168,6 +168,26 @@ export function adaptMaskclawStats(raw: unknown): MaskclawStatsView {
   };
 }
 
+/**
+ * MASKED footer chip. `local_route_id` lives in maskclaw.toml and is independent of
+ * the Models checkboxes, so a leftover `unsloth-local` would otherwise keep showing
+ * while force_local is `never` (unused) or after Unsloth was turned off.
+ */
+export function forceLocalRouteLabel(
+  forceLocal: string,
+  localRouteId: string,
+  liveRouteIds?: string[],
+): string {
+  const id = localRouteId.trim();
+  if (!id || forceLocal === "never") {
+    return "";
+  }
+  if (liveRouteIds && !liveRouteIds.includes(id)) {
+    return "";
+  }
+  return id;
+}
+
 export async function fetchStats(fetcher: typeof fetch = fetch): Promise<StatsSnapshot> {
   const response = await fetcher("/v1/maskclaw/stats");
   if (!response.ok) {

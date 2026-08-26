@@ -29,7 +29,6 @@ const PORT_PROBE_TIMEOUT_MS: u64 = 200;
 const DEFAULT_MASKCLAW_TOML: &str = r#"enabled = true
 session_ttl_secs = 900
 force_local = "never"
-local_route_id = "local"
 
 [detectors]
 email = true
@@ -624,8 +623,97 @@ fn write_toml_and_restart(
     }
     secrets::store_secrets(secrets)?;
     fs::write(active_routes_path(&inner.data_dir), toml).map_err(|e| e.to_string())?;
+    if is_maskclaw_build() {
+        let sidecar_path = active_maskclaw_path(&inner.data_dir);
+        if sidecar_path.is_file() {
+            let sidecar = fs::read_to_string(&sidecar_path).map_err(|e| e.to_string())?;
+            let synced = sync_maskclaw_local_route(&sidecar, toml);
+            if synced != sidecar {
+                fs::write(&sidecar_path, synced).map_err(|e| e.to_string())?;
+            }
+        }
+    }
     write_settings(&inner.data_dir, inner.telemetry_opt_in, true)?;
     restart_locked(inner)
+}
+
+const LOCAL_ROUTE_IDS: [&str; 3] = ["unsloth-local", "lmstudio-local", "gemma-local"];
+
+fn live_local_route_ids(routes_toml: &str) -> Vec<&'static str> {
+    LOCAL_ROUTE_IDS
+        .into_iter()
+        .filter(|id| {
+            routes_toml
+                .lines()
+                .any(|line| line.trim() == format!("id = \"{id}\""))
+        })
+        .collect()
+}
+
+fn current_local_route_id(maskclaw_toml: &str) -> String {
+    for line in maskclaw_toml.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            break;
+        }
+        let Some(rest) = trimmed.strip_prefix("local_route_id") else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let Some(rest) = rest.strip_prefix('=') else {
+            continue;
+        };
+        return rest.trim().trim_matches('"').to_string();
+    }
+    String::new()
+}
+
+fn sync_maskclaw_local_route(maskclaw_toml: &str, routes_toml: &str) -> String {
+    let live = live_local_route_ids(routes_toml);
+    let current = current_local_route_id(maskclaw_toml);
+    let next = if live.iter().any(|id| *id == current.as_str()) {
+        current
+    } else {
+        live.first().copied().unwrap_or("").to_string()
+    };
+    set_top_level_toml_string(maskclaw_toml, "local_route_id", &next)
+}
+
+fn set_top_level_toml_string(toml: &str, key: &str, value: &str) -> String {
+    let prefix = format!("{key} =");
+    let mut out = Vec::new();
+    let mut saw_table = false;
+    let mut replaced = false;
+    for line in toml.lines() {
+        let trimmed = line.trim();
+        if !saw_table && trimmed.starts_with('[') {
+            if !replaced && !value.is_empty() {
+                out.push(format!("{key} = \"{value}\""));
+                replaced = true;
+            }
+            saw_table = true;
+        }
+        if !saw_table && trimmed.starts_with(&prefix) {
+            replaced = true;
+            if value.is_empty() {
+                continue;
+            }
+            out.push(format!("{key} = \"{value}\""));
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    if !replaced && !value.is_empty() {
+        if !out.is_empty() && !out.last().is_some_and(|line| line.is_empty()) {
+            out.push(String::new());
+        }
+        out.push(format!("{key} = \"{value}\""));
+    }
+    let mut joined = out.join("\n");
+    if toml.ends_with('\n') && !joined.ends_with('\n') {
+        joined.push('\n');
+    }
+    joined
 }
 
 #[tauri::command]
@@ -1264,8 +1352,24 @@ api_key_env = "UNSLOTH_API_KEY"
         let body = fs::read_to_string(&dest).expect("read");
         assert!(body.contains("enabled = true"));
         assert!(body.contains("[detectors]"));
+        assert!(!body.contains("unsloth"));
+        assert!(!body.contains("local_route_id"));
         seed_maskclaw_file(&dest, "maskclaw").expect("idempotent");
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sync_drops_stale_unsloth_local_route() {
+        let sidecar = "enabled = true\nforce_local = \"never\"\nlocal_route_id = \"unsloth-local\"\n\n[detectors]\nemail = true\n";
+        let routes = "schema_version = 1\n[routes.minimax]\nid = \"minimax-m3\"\n";
+        let synced = sync_maskclaw_local_route(sidecar, routes);
+        assert!(!synced.contains("unsloth"));
+        assert!(!synced.contains("local_route_id"));
+        let keep = sync_maskclaw_local_route(
+            sidecar,
+            "schema_version = 1\n[routes.local]\nid = \"unsloth-local\"\n",
+        );
+        assert!(keep.contains("unsloth-local"));
     }
 
     #[test]

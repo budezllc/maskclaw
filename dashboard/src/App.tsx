@@ -448,7 +448,9 @@ export function App() {
                     onDismissProbes={() => setProbes([])}
                   />
                 ) : null}
-                {ready && !locked && page === "mask" ? <MaskPage maskclaw={maskclaw} /> : null}
+                {ready && !locked && page === "mask" ? (
+                  <MaskPage maskclaw={maskclaw} routeIds={routes.map((route) => route.id)} />
+                ) : null}
                 {ready && !locked && page === "models" ? (
                   <ModelsPage
                     routesToml={routesToml}
