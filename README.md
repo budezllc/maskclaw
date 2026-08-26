@@ -2,14 +2,19 @@
 
 On-prem privacy proxy for OpenAI-compatible LLM clients. Prompts hit MaskClaw first. Secrets and PII become stable placeholders, the redacted request is routed (local or cloud), then originals are restored on the way back.
 
-This repository is the **product tree**: Windows desktop, web dashboard, Raspberry Pi 5 appliance, and the MaskClaw engine (a Switchyard fork with the privacy layer).
+Two products, one repo:
+
+- **MASKCLAW DESKTOP** — Windows 10/11 app
+- **MASKCLAW appliance** — Raspberry Pi 5 box on the LAN
+
+The engine under `engine/` is a Switchyard fork with the MaskClaw privacy layer. Desktop and the Pi both run that engine.
 
 ```text
 MASKCLAW/
   engine/      switchyard-server + MaskClaw masking
-  desktop/     Windows GUI (MaskClaw-only Tauri app)
-  dashboard/   Web UI for the sidecar and the Pi
+  desktop/     Windows app (Tauri)
   appliance/   Pi 5 deploy (binaries, Caddy, hostd, systemd)
+  dashboard/   browser UI the Pi serves (also used in tests)
 ```
 
 Clone **one** repo. Build desktop, the appliance, or both.
@@ -34,7 +39,7 @@ Hits become session-stable placeholders `__MC_<kind>_<12 hex>__`. Maps live in R
 
 ## Desktop (Windows)
 
-Produces the **MASKCLAW DESKTOP** installer. It bundles `switchyard-server` built from `engine/`. UI: **HOME**, **MASKED**, **MODELS**, **SETTINGS** (no BOX — that is appliance-only).
+Produces the **MASKCLAW DESKTOP** installer. It bundles `switchyard-server` built from `engine/`. UI: **HOME**, **MASKED**, **MODELS**, **SETTINGS**. BOX (password, hostname, Ethernet / Wi-Fi) is appliance-only — use the Pi in a browser for that.
 
 | Tool | Notes |
 | --- | --- |
@@ -59,22 +64,13 @@ npm run tauri:dev
 
 The engine listens at `http://127.0.0.1:4000` (`/v1` for clients). WebView2 is required (Windows 11 usually has it). API keys stay in Windows Credential Manager; `routes.toml` and `maskclaw.toml` live under `%APPDATA%\com.switchyard.app\`.
 
-## Dashboard (web)
-
-Sidecar/appliance UI. Same surfaces as desktop, plus **BOX** on the Pi (password, hostname, Ethernet / Wi-Fi).
-
-```powershell
-cd dashboard
-pnpm install
-pnpm test
-pnpm dev
-```
-
-Open `http://127.0.0.1:5173` (not `localhost` on this Windows setup). Optional hosts entry: `127.0.0.1 maskclaw.local`. Appliance-flavored Vite: `pnpm run dev:appliance`. Control API start/stop/restart and TOML save are on `/control`.
+If desktop is running, you do not need a separate browser UI on that PC.
 
 ## Appliance (Raspberry Pi 5)
 
-Builds a Linux aarch64 engine in Docker on the PC, builds the dashboard, and stages Raspberry Pi OS bootfs. Engine **source never goes on the Pi**. Dashboard is HTTPS on **443** (Caddy `tls internal`); LLM `/v1` stays HTTP on **80**.
+Builds a Linux aarch64 engine in Docker on the PC, stages Raspberry Pi OS bootfs, and copies the browser UI the Pi serves on **HTTPS 443** (Caddy `tls internal`). Engine **source never goes on the Pi**. LLM `/v1` stays HTTP on **80**.
+
+On the Pi you open the UI in a browser (`https://<pi-ip>/` or `https://maskclaw.local/`). That is the appliance control surface (including BOX), not a third product.
 
 ```powershell
 cd appliance
@@ -84,6 +80,8 @@ pwsh scripts/stage-bootfs.ps1 -BootDrive G
 ```
 
 Bring-up notes: [appliance/DESK-PI.md](appliance/DESK-PI.md). Full appliance docs: [appliance/README.md](appliance/README.md).
+
+To unit-test or visually check the Pi UI on the PC without flashing a card, see [dashboard/README.md](dashboard/README.md). That path is for checks, not day-to-day use on Windows.
 
 ## Tests
 
@@ -102,4 +100,4 @@ Do not run live Exa/LLM calls in these suites; desktop and dashboard tests are m
 
 The routing engine under `engine/` is [Apache 2.0](engine/LICENSE), Copyright NVIDIA Corporation, plus MaskClaw privacy-layer changes.
 
-Desktop, dashboard, and appliance are MaskClaw product sources in this repository.
+Desktop and appliance are MaskClaw product sources in this repository. `dashboard/` is the appliance’s browser UI.

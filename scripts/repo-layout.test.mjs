@@ -38,7 +38,7 @@ test("desktop sidecar resolves the in-tree engine", () => {
   }
 });
 
-test("root README documents the product tree and current surfaces", () => {
+test("root README documents desktop and appliance as the products", () => {
   const readme = read("README.md");
   for (const needle of [
     "engine/",
@@ -51,13 +51,17 @@ test("root README documents the product tree and current surfaces", () => {
     "MODELS",
     "SETTINGS",
     "npm run tauri:build",
-    "pnpm dev",
     "pwsh scripts/build-engine-aarch64.ps1",
     "GET /v1/maskclaw/stats",
     "force_local",
   ]) {
     assert.ok(readme.includes(needle), `README.md missing ${needle}`);
   }
+  assert.ok(readme.includes("MASKCLAW DESKTOP"));
+  assert.ok(readme.includes("Raspberry Pi 5"));
+  assert.ok(readme.includes("dashboard/README.md"));
+  assert.ok(!readme.includes("## Dashboard (web)"));
+  assert.ok(!readme.includes("pnpm dev"));
   assert.ok(!readme.includes("switchyard launch"));
   assert.ok(!readme.includes('id = "switchyard"'));
 });
