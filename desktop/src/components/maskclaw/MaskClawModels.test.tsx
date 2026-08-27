@@ -71,18 +71,29 @@ describe("MaskClawModels", () => {
     const cloudTab = [...(host?.querySelectorAll('[role="tab"]') ?? [])];
     expect(cloudTab.map((tab) => tab.textContent)).toEqual(["Cloud", "Local"]);
     expect(host?.querySelector(".mc-save")).toBeTruthy();
-    expect(host?.querySelector('[aria-label="Provider"]')).toBeTruthy();
-    await act(async () => {
-      (host?.querySelector('[aria-label="Provider"]') as HTMLButtonElement).click();
-    });
-    expect([...host!.querySelectorAll('[role="option"]')].map((el) => el.textContent)).toEqual([
+    const provider = host?.querySelector('[aria-label="Provider"]') as HTMLSelectElement;
+    expect(provider).toBeTruthy();
+    expect(provider.tagName).toBe("SELECT");
+    expect([...provider.options].map((option) => option.textContent)).toEqual([
       "MiniMax",
       "OpenRouter",
       "OpenAI",
       "Anthropic",
       "Custom",
     ]);
-    expect((host?.querySelector('[aria-label="Strong model"]') as HTMLInputElement).value).toBe("MiniMax-M3");
+    await act(async () => {
+      provider.value = "openrouter";
+      provider.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect((host?.querySelector("#cloud-url") as HTMLInputElement)?.value).toContain("openrouter.ai");
+    expect(host?.querySelector('[role="listbox"]')).toBeNull();
+    await act(async () => {
+      provider.value = "minimax";
+      provider.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(host?.textContent).toContain("List models");
+    expect(host?.textContent).toContain("Test");
+    expect(host?.textContent).toContain("Save each provider separately");
     expect(host?.textContent).not.toMatch(/China endpoint/i);
     expect([...host!.querySelectorAll("button")].some((btn) => btn.textContent === "Start")).toBe(false);
 

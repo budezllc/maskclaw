@@ -1,4 +1,4 @@
-import type { CloudProvider, LocalKind, SetupForm } from "./setupTypes";
+import { CLOUD_ORDER, LOCAL_ORDER, type CloudProvider, type LocalKind, type SetupForm } from "./setupTypes";
 
 export const SERVICE_NAME = "com.switchyard.app";
 
@@ -47,13 +47,17 @@ export interface SecretBinding {
 /** Keys that must be injected into the sidecar environment. Never written to TOML. */
 export function secretsFromSetup(form: SetupForm): SecretBinding[] {
   const out: SecretBinding[] = [];
-  if (form.cloud.enabled && form.cloud.apiKey.trim()) {
-    out.push({
-      envName: cloudApiKeyEnv(form.cloud.provider),
-      value: form.cloud.apiKey.trim(),
-    });
+  const clouds = { ...form.clouds, [form.cloud.provider]: { ...form.cloud } };
+  for (const provider of CLOUD_ORDER) {
+    const cloud = clouds[provider];
+    if (cloud.enabled && cloud.apiKey.trim()) {
+      out.push({
+        envName: cloudApiKeyEnv(provider),
+        value: cloud.apiKey.trim(),
+      });
+    }
   }
-  for (const kind of ["unsloth", "lmstudio", "gemma"] as LocalKind[]) {
+  for (const kind of LOCAL_ORDER) {
     const local = form.locals[kind];
     if (local.enabled) {
       out.push({

@@ -11,12 +11,7 @@
         "backgroundColor": "#111111",
         "scrollBarStyle": "fluentOverlay"
       }
-    ],
-    "trayIcon": {
-      "id": "main",
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": false
-    }
+    ]
   },
   "bundle": {
     "icon": [

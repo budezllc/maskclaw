@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { appDisplayName, isMaskclawFlavor, parseEngineFlavor } from "./engineFlavor";
+import { appDisplayName, appVersion, isMaskclawFlavor, parseEngineFlavor, windowTitle } from "./engineFlavor";
 // JS helper used by fetch-sidecar / with-engine.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-expect-error no types for sidecar scripts
@@ -28,6 +28,12 @@ describe("parseEngineFlavor", () => {
   it("names the MaskClaw flavor MASKCLAW DESKTOP", () => {
     expect(appDisplayName("maskclaw")).toBe("MASKCLAW DESKTOP");
     expect(appDisplayName("stock")).toBe("Switchyard");
+  });
+
+  it("puts the package version next to MASKCLAW DESKTOP", () => {
+    expect(appVersion()).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(windowTitle("maskclaw")).toBe(`MASKCLAW DESKTOP ${appVersion()}`);
+    expect(windowTitle("stock")).toBe(`Switchyard ${appVersion()}`);
   });
 });
 

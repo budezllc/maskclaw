@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AppSnapshot, ProbeResult } from "../../api";
 import {
   fetchHealth,
@@ -11,16 +11,28 @@ import {
   startEngine,
   stopEngine,
 } from "../../api";
-import { CopyButton } from "../CopyButton";
 import { Settings } from "../Settings";
+import { MaskClawHome } from "./MaskClawHome";
 import { MaskClawModels } from "./MaskClawModels";
 import { snapshotFromInvokeError } from "../../lib/engineControls";
 import { POLL_INTERVAL_MS, POLL_TIMEOUT_MS, createPollGate, runPollTick, withTimeout } from "../../lib/enginePoll";
-import { formatCount, formatMs, lastRequestHop } from "../../lib/formatStats";
+import { formatCount } from "../../lib/formatStats";
 import { MASKCLAW_NAV_ITEMS, type MaskclawPane } from "../../lib/maskclawNav";
-import { adaptMaskclawStats, type MaskclawStatsView } from "../../lib/maskclawStatsAdapter";
-import { defaultModelFromPayload, parseRoutes, type RouteRow } from "../../lib/parseRoutes";
-import { adaptStats, routeTargetAliases, trackStatsByRoute, type StatsViewModel } from "../../lib/statsAdapter";
+import {
+  adaptMaskclawStats,
+  forceLocalRouteLabel,
+  localRouteIdsInToml,
+  type MaskclawStatsView,
+} from "../../lib/maskclawStatsAdapter";
+import {
+  parseRoutes,
+  routeIdsFromToml,
+  routeRowsFromIds,
+  type RouteRow,
+} from "../../lib/parseRoutes";
+import { adaptStats, type StatsViewModel } from "../../lib/statsAdapter";
+import { backendIdsByRoute } from "../../lib/setupHydrate";
+import { extractBaseUrls } from "../../lib/tomlEdit";
 import { applyAppearance, nextAppearance, persistAppearance, themeActionWord, type Appearance } from "../../lib/theme";
 
 interface Props {
@@ -81,189 +93,15 @@ function NavIcon({ name }: { name: (typeof MASKCLAW_NAV_ITEMS)[number]["icon"] }
   );
 }
 
-function HomePage({
-  snap,
-  stats,
-  routes,
-  modelsPayload,
-  engineUp,
-  probes,
-  busy,
-  resetting,
-  onStart,
-  onStop,
-  onRestart,
-  onProbe,
-  onReset,
+function MaskedPage({
+  maskclaw,
+  routesToml,
+  routeIds,
 }: {
-  snap: AppSnapshot;
-  stats: StatsViewModel | null;
-  routes: RouteRow[];
-  modelsPayload: unknown;
-  engineUp: boolean;
-  probes: ProbeResult[];
-  busy: boolean;
-  resetting: boolean;
-  onStart: () => void;
-  onStop: () => void;
-  onRestart: () => void;
-  onProbe: () => void;
-  onReset: () => void;
+  maskclaw: MaskclawStatsView | null;
+  routesToml: string;
+  routeIds: string[];
 }) {
-  const aliases = routeTargetAliases(snap.config_toml);
-  const byRoute = trackStatsByRoute(
-    routes.map((route) => route.id),
-    stats,
-    aliases,
-  );
-  const listenUrl = snap.listen_url.replace(/\/$/, "");
-  const listenUrlV1 = `${listenUrl}/v1`;
-  const modelId = defaultModelFromPayload(
-    modelsPayload,
-    routes.map((route) => route.id),
-  );
-  const hop = lastRequestHop(snap.logs);
-  return (
-    <div className="mc-page">
-      <header>
-        <h1 className="mc-h1">HOME</h1>
-        <div className="mc-toolbar">
-          <span className={`mc-engine${engineUp ? "" : " down"}`}>{engineUp ? "Engine up" : "Engine down"}</span>
-          <button type="button" className="mc-btn primary" disabled={busy || engineUp} onClick={onStart}>
-            Start
-          </button>
-          <button type="button" className="mc-btn stop" disabled={busy || !engineUp} onClick={onStop}>
-            Stop
-          </button>
-          <button type="button" className="mc-btn" disabled={busy} onClick={onRestart}>
-            Restart
-          </button>
-          <button type="button" className="mc-btn" disabled={busy} onClick={onProbe}>
-            Probe backends
-          </button>
-          <button type="button" className="mc-btn" disabled={resetting} onClick={onReset}>
-            Reset stats
-          </button>
-        </div>
-      </header>
-
-      {snap.last_error ? <p className="err">{snap.last_error}</p> : null}
-
-      <section className="mc-card">
-        <h2>Client target</h2>
-        <p className="mc-lede">
-          Point tools at the sidecar. Send a track id such as lmstudio-local to pin that backend.
-          switchyard auto-routes and is not a pin.
-        </p>
-        <div className="mc-row">
-          <div>
-            <p className="mc-k">Base URL</p>
-            <p className="mc-mono">{listenUrl}</p>
-          </div>
-          <CopyButton label="base URL" value={listenUrl} caption="Copy" />
-        </div>
-        <div className="mc-row">
-          <div>
-            <p className="mc-k">Base URL v1</p>
-            <p className="mc-mono">{listenUrlV1}</p>
-          </div>
-          <CopyButton label="base URL v1" value={listenUrlV1} caption="Copy V1" />
-        </div>
-        <div className="mc-row">
-          <div>
-            <p className="mc-k">Model</p>
-            <p className="mc-mono">{modelId}</p>
-          </div>
-          <CopyButton label="model" value={modelId} caption="Copy" />
-        </div>
-        {hop ? (
-          <div>
-            <p className="mc-k">Last request</p>
-            <p className="mc-mono">
-              {hop.requested} → {hop.selected}
-            </p>
-          </div>
-        ) : null}
-      </section>
-
-      <div className="mc-metrics">
-        <Metric label="Requests" value={formatCount(stats?.totalRequests ?? 0)} />
-        <Metric label="Errors" value={formatCount(stats?.totalErrors ?? 0)} />
-        <Metric label="Classifier" value={formatCount(stats?.classifierRequests ?? 0)} />
-        <Metric label="Fallbacks" value={formatCount(stats?.routingFallbacks.count ?? 0)} />
-      </div>
-      <div className="mc-metrics">
-        <Metric label="Prompt tokens" value={formatCount(stats?.totalTokens.prompt_tokens ?? 0)} />
-        <Metric label="Completion" value={formatCount(stats?.totalTokens.completion_tokens ?? 0)} />
-        <Metric label="Cached" value={formatCount(stats?.totalTokens.cached_tokens ?? 0)} />
-        <Metric
-          label="Routing overhead"
-          value={formatMs(stats?.routingOverhead.avgMs ?? null)}
-          hint={stats ? `${formatCount(stats.routingOverhead.count)} decisions` : undefined}
-        />
-      </div>
-
-      <section className="mc-card">
-        <h2>Tracks</h2>
-        <p className="mc-lede">Each row is a route id clients can send as model.</p>
-        {routes.length === 0 ? (
-          <p className="mc-empty">Start the engine, then this table fills from /v1/models.</p>
-        ) : (
-          <div className="mc-table-wrap">
-            <table className="mc-table">
-              <thead>
-                <tr>
-                  <th>Track</th>
-                  <th>Destination</th>
-                  <th>Calls</th>
-                  <th>Errors</th>
-                  <th>Avg latency</th>
-                  <th>Context</th>
-                </tr>
-              </thead>
-              <tbody>
-                {routes.map((route) => {
-                  const model = byRoute[route.id];
-                  return (
-                    <tr key={route.id}>
-                      <td>{route.track}</td>
-                      <td>
-                        <div>{route.id}</div>
-                        {model && model.id !== route.id ? <div className="mc-sub">{model.id}</div> : null}
-                      </td>
-                      <td>{model ? formatCount(model.calls) : "—"}</td>
-                      <td>{model ? formatCount(model.errors) : "—"}</td>
-                      <td>{formatMs(model?.avgLatencyMs ?? null)}</td>
-                      <td>{route.contextWindow ? formatCount(route.contextWindow) : "—"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {probes.length > 0 ? (
-        <ul className="mc-probes">
-          {probes.map((probe) => (
-            <li key={probe.url}>
-              {probe.label} — {probe.url} — {probe.detail}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      <section className="mc-card">
-        <h2>Activity</h2>
-        <p className="mc-lede">Routing log and engine console on this box.</p>
-        <pre className="mc-tape">{snap.logs.length > 0 ? snap.logs.join("\n") : "No movements yet."}</pre>
-      </section>
-    </div>
-  );
-}
-
-function MaskedPage({ maskclaw }: { maskclaw: MaskclawStatsView | null }) {
   if (!maskclaw) {
     return (
       <div className="mc-page">
@@ -280,6 +118,8 @@ function MaskedPage({ maskclaw }: { maskclaw: MaskclawStatsView | null }) {
       </div>
     );
   }
+  const liveIds = [...new Set([...routeIds, ...localRouteIdsInToml(routesToml)])];
+  const localRoute = forceLocalRouteLabel(maskclaw.forceLocal, maskclaw.localRouteId, liveIds);
   return (
     <div className="mc-page">
       <h1 className="mc-h1">MASKED</h1>
@@ -319,7 +159,7 @@ function MaskedPage({ maskclaw }: { maskclaw: MaskclawStatsView | null }) {
       </section>
       <div className="mc-chips">
         <span className="mc-chip">force_local {maskclaw.forceLocal}</span>
-        {maskclaw.localRouteId ? <span className="mc-chip">local route {maskclaw.localRouteId}</span> : null}
+        {localRoute ? <span className="mc-chip">local route {localRoute}</span> : null}
         <span className="mc-chip">ttl {maskclaw.sessionTtlSecs}s</span>
       </div>
     </div>
@@ -335,6 +175,7 @@ export function MaskClawApp({ snap, pane, onPane, onChange, refresh, theme, onTh
   const [probes, setProbes] = useState<ProbeResult[]>([]);
   const [busy, setBusy] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const trackBackendIds = useMemo(() => backendIdsByRoute(snap.config_toml), [snap.config_toml]);
 
   useEffect(() => {
     let cancelled = false;
@@ -353,6 +194,11 @@ export function MaskClawApp({ snap, pane, onPane, onChange, refresh, theme, onTh
         if (polled.models !== null) {
           setModelsPayload(polled.models);
           setRoutes(parseRoutes(polled.models));
+        } else if (snap.config_toml) {
+          const fallback = routeRowsFromIds(routeIdsFromToml(snap.config_toml));
+          if (fallback.length > 0) {
+            setRoutes(fallback);
+          }
         }
         setMaskclaw(adaptMaskclawStats(polled.maskclawStats));
       });
@@ -363,7 +209,7 @@ export function MaskClawApp({ snap, pane, onPane, onChange, refresh, theme, onTh
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [snap.engine_state]);
+  }, [snap.engine_state, snap.config_toml]);
 
   async function run(action: () => Promise<AppSnapshot>) {
     setBusy(true);
@@ -380,10 +226,9 @@ export function MaskClawApp({ snap, pane, onPane, onChange, refresh, theme, onTh
   async function probeFromConfig() {
     setBusy(true);
     try {
-      const urls = [...snap.config_toml.matchAll(/base_url\s*=\s*"([^"]+)"/g)].map((m) => m[1]);
-      const unique = [...new Set(urls)];
+      const urls = extractBaseUrls(snap.config_toml);
       const results: ProbeResult[] = [];
-      for (const url of unique) {
+      for (const url of urls) {
         try {
           results.push(await withTimeout(probeBackend(url), POLL_TIMEOUT_MS, "probe"));
         } catch (err) {
@@ -406,18 +251,21 @@ export function MaskClawApp({ snap, pane, onPane, onChange, refresh, theme, onTh
     <div className="mc-app">
       <aside className="mc-sidebar">
         <div className="mc-brand">
-          <p className="mc-eyebrow">MaskClaw</p>
           <p className="mc-brand-title">MASKCLAW</p>
         </div>
         <div className="mc-nav-wrap">
-          <p className="mc-group-label">MaskClaw</p>
           <nav className="mc-nav">
             {MASKCLAW_NAV_ITEMS.map((item) => (
               <button
                 key={item.pane}
                 type="button"
                 className={pane === item.pane ? "active" : ""}
-                onClick={() => onPane(item.pane)}
+                onClick={() => {
+                  if (item.pane !== "board") {
+                    setProbes([]);
+                  }
+                  onPane(item.pane);
+                }}
               >
                 <NavIcon name={item.icon} />
                 {item.label}
@@ -443,11 +291,14 @@ export function MaskClawApp({ snap, pane, onPane, onChange, refresh, theme, onTh
       </aside>
       <main className="mc-main">
         {pane === "board" && (
-          <HomePage
-            snap={snap}
+          <MaskClawHome
+            listenUrl={snap.listen_url}
+            logs={snap.logs}
+            lastError={snap.last_error}
             stats={stats}
             routes={routes}
             modelsPayload={modelsPayload}
+            backendIdsByRoute={trackBackendIds}
             engineUp={engineUp}
             probes={probes}
             busy={busy}
@@ -467,9 +318,16 @@ export function MaskClawApp({ snap, pane, onPane, onChange, refresh, theme, onTh
                 }
               })();
             }}
+            onDismissProbes={() => setProbes([])}
           />
         )}
-        {pane === "mask" && <MaskedPage maskclaw={maskclaw} />}
+        {pane === "mask" && (
+          <MaskedPage
+            maskclaw={maskclaw}
+            routesToml={snap.config_toml}
+            routeIds={routes.map((route) => route.id)}
+          />
+        )}
         {pane === "models" && (
           <MaskClawModels configToml={snap.config_toml} onChange={onChange} />
         )}

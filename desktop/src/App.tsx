@@ -6,7 +6,7 @@ import { MaskClawApp } from "./components/maskclaw/MaskClawApp";
 import { Settings } from "./components/Settings";
 import { SetupWizard } from "./components/SetupWizard";
 import { applyAppearance, nextAppearance, persistAppearance, readAppearance, themeToggleLabel, type Appearance } from "./lib/theme";
-import { appDisplayName, isMaskclawFlavor } from "./lib/engineFlavor";
+import { appDisplayName, isMaskclawFlavor, windowTitle } from "./lib/engineFlavor";
 import { type MaskclawPane } from "./lib/maskclawNav";
 import { RAIL_ITEMS, X_PROFILE_HANDLE, X_PROFILE_URL, type Pane } from "./lib/railNav";
 
@@ -97,7 +97,7 @@ export function App() {
   }, [refresh]);
 
   useEffect(() => {
-    document.title = appDisplayName(snap?.engine_flavor);
+    document.title = windowTitle(snap?.engine_flavor);
     const root = document.documentElement;
     if (isMaskclawFlavor(snap?.engine_flavor)) {
       root.classList.add("mc-root");

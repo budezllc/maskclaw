@@ -1,8 +1,11 @@
 import { cloudApiKeyEnv, localApiKeyEnv } from "./secretMapping";
 import {
+  CLOUD_ORDER,
   DEFAULT_CLOUD_URLS,
   LOCAL_ORDER,
   MINIMAX_CHINA_URL,
+  defaultClouds,
+  type CloudForm,
   type CloudProvider,
   type LocalKind,
   type SetupForm,
@@ -34,17 +37,35 @@ interface RouteSpec {
   fields: string[];
 }
 
-function cloudBaseUrl(form: SetupForm): string {
-  if (form.cloud.provider === "minimax") {
-    return form.cloud.useChinaEndpoint ? MINIMAX_CHINA_URL : DEFAULT_CLOUD_URLS.minimax;
+function cloudBaseUrl(cloud: CloudForm): string {
+  if (cloud.provider === "minimax" && cloud.useChinaEndpoint) {
+    return MINIMAX_CHINA_URL;
   }
-  if (form.cloud.provider === "custom") {
-    return form.cloud.baseUrl.replace(/\/$/, "");
+  if (cloud.provider === "custom") {
+    return cloud.baseUrl.replace(/\/$/, "");
   }
-  return (form.cloud.baseUrl || DEFAULT_CLOUD_URLS[form.cloud.provider]).replace(
-    /\/$/,
-    "",
-  );
+  return (cloud.baseUrl || DEFAULT_CLOUD_URLS[cloud.provider]).replace(/\/$/, "");
+}
+
+function resolvedClouds(form: SetupForm): Record<CloudProvider, CloudForm> {
+  const clouds = form.clouds ?? defaultClouds();
+  return {
+    ...clouds,
+    [form.cloud.provider]: { ...form.cloud },
+  };
+}
+
+function enabledCloudProviders(form: SetupForm): CloudProvider[] {
+  const clouds = resolvedClouds(form);
+  return CLOUD_ORDER.filter((provider) => clouds[provider].enabled);
+}
+
+function cloudTargetName(provider: CloudProvider, strongProvider: CloudProvider): string {
+  return provider === strongProvider ? "strong" : `${provider}_target`;
+}
+
+function cloudRouteTable(provider: CloudProvider): string {
+  return provider === "minimax" ? "minimax" : provider;
 }
 
 function cloudFormat(provider: CloudProvider): string {
@@ -56,22 +77,14 @@ function cloudClientName(provider: CloudProvider): string {
 }
 
 function cloudRouteId(provider: CloudProvider, modelId: string): string {
-  if (provider === "minimax" && (!modelId || modelId === "MiniMax-M3")) {
-    return "minimax-m3";
+  return modelId.trim() || `${provider}-cloud`;
+}
+
+function pickStrongProvider(form: SetupForm, enabled: CloudProvider[]): CloudProvider {
+  if (enabled.includes(form.strongProvider)) {
+    return form.strongProvider;
   }
-  const slug = modelId
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-  return slug || `${provider}-cloud`;
-}
-
-function cloudStrongModelId(form: SetupForm): string {
-  return form.cloud.modelId.trim();
-}
-
-function cloudWeakModelId(form: SetupForm): string {
-  return form.cloud.weakModelId.trim();
+  return enabled[0];
 }
 
 function localClientName(kind: LocalKind): string {
@@ -132,10 +145,11 @@ function ensureSmartRoute(
 }
 
 export function buildDeployment(form: SetupForm): BuiltDeployment {
-  const cloudOn = form.cloud.enabled;
+  const clouds = resolvedClouds(form);
+  const enabledClouds = enabledCloudProviders(form);
   const locals = enabledLocals(form);
-  if (!cloudOn && locals.length === 0) {
-    throw new Error("Turn on a cloud key or at least one local app before starting.");
+  if (enabledClouds.length === 0 && locals.length === 0) {
+    throw new Error("Turn on a cloud key or at least one local app before saving.");
   }
 
   const clients: ClientSpec[] = [];
@@ -147,34 +161,40 @@ export function buildDeployment(form: SetupForm): BuiltDeployment {
   const rememberPair = (client: string, id: string) => {
     const key = uniquePairKey(client, id);
     if (pairs.has(key) && client && id) {
-      // Same pair reused as classifier + weak is allowed; collisions across
-      // distinct roles (two locals sharing one client+id) are not.
+      // Same pair reused as classifier + weak is allowed.
     }
     pairs.add(key);
   };
 
+  const strongProvider = enabledClouds.length ? pickStrongProvider(form, enabledClouds) : undefined;
   let cloudTarget: string | undefined;
-  if (cloudOn) {
-    const name = cloudClientName(form.cloud.provider);
-    const env = cloudApiKeyEnv(form.cloud.provider);
+  const strongCloud = strongProvider ? clouds[strongProvider] : undefined;
+  const cloudWeakId = strongCloud?.weakModelId.trim() ?? "";
+
+  for (const provider of enabledClouds) {
+    const cloud = clouds[provider];
+    const name = cloudClientName(provider);
+    const env = cloudApiKeyEnv(provider);
     apiKeyEnvs.push(env);
     clients.push({
       name,
-      format: cloudFormat(form.cloud.provider),
-      baseUrl: cloudBaseUrl(form),
+      format: cloudFormat(provider),
+      baseUrl: cloudBaseUrl(cloud),
       apiKeyEnv: env,
     });
-    const modelId = cloudStrongModelId(form);
+    const modelId = cloud.modelId.trim();
     if (!modelId) {
-      throw new Error("Enter the strong model id your cloud account already uses.");
+      throw new Error(`Enter the model id for ${provider}.`);
     }
     rememberPair(name, modelId);
-    targets.push({ name: "strong", id: modelId, llmClient: name });
-    cloudTarget = "strong";
-    const weakId = cloudWeakModelId(form);
-    if (weakId && locals.length === 0) {
-      rememberPair(name, weakId);
-      targets.push({ name: "weak", id: weakId, llmClient: name });
+    const targetName = cloudTargetName(provider, strongProvider ?? provider);
+    targets.push({ name: targetName, id: modelId, llmClient: name });
+    if (provider === strongProvider) {
+      cloudTarget = targetName;
+    }
+    if (provider === strongProvider && cloudWeakId && locals.length === 0) {
+      rememberPair(name, cloudWeakId);
+      targets.push({ name: "weak", id: cloudWeakId, llmClient: name });
     }
   }
 
@@ -195,7 +215,7 @@ export function buildDeployment(form: SetupForm): BuiltDeployment {
       throw new Error(`Enter a model name for ${kind}.`);
     }
     rememberPair(client, modelId);
-    const targetName = localTargets.length === 0 && cloudOn ? "weak" : `${kind}_target`;
+    const targetName = localTargets.length === 0 && enabledClouds.length > 0 ? "weak" : `${kind}_target`;
     const extraBody =
       kind === "unsloth" ? "{ chat_template_kwargs = { enable_thinking = false } }" : undefined;
     targets.push({ name: targetName, id: modelId, llmClient: client, extraBody });
@@ -204,11 +224,29 @@ export function buildDeployment(form: SetupForm): BuiltDeployment {
 
   const firstLocal = localTargets[0];
 
+  function pushCloudPassthrough(provider: CloudProvider) {
+    const cloud = clouds[provider];
+    const target = cloudTargetName(provider, strongProvider ?? provider);
+    const fields = [`type = "passthrough"`, `target = "${target}"`];
+    if (provider === "minimax") {
+      fields.push(`context_window = 1000000`, `tool_calling = true`, `reasoning = true`);
+    }
+    routes.push({
+      table: cloudRouteTable(provider),
+      id: cloudRouteId(provider, cloud.modelId || provider),
+      type: "passthrough",
+      fields,
+    });
+  }
+
+  const cloudOn = enabledClouds.length > 0;
+  const minimaxStrong = strongProvider === "minimax";
+
   if (cloudOn && firstLocal) {
     const smartFields = [
       `type = "llm_classifier"`,
       `mode = "capability"`,
-      `classifier_target = "${firstLocal.target}"`,
+      `classifier_target = "strong"`,
       `strong_target = "strong"`,
       `weak_target = "${firstLocal.target}"`,
       `base_threshold = 0.5`,
@@ -216,7 +254,7 @@ export function buildDeployment(form: SetupForm): BuiltDeployment {
       `session_affinity = true`,
       `message_hash_fallback = true`,
     ];
-    if (form.cloud.provider === "minimax") {
+    if (minimaxStrong) {
       smartFields.push(`context_window = 1000000`, `tool_calling = true`, `reasoning = true`);
     }
     routes.push({
@@ -226,16 +264,9 @@ export function buildDeployment(form: SetupForm): BuiltDeployment {
       fields: smartFields,
     });
 
-    const cloudFields = [`type = "passthrough"`, `target = "strong"`];
-    if (form.cloud.provider === "minimax") {
-      cloudFields.push(`context_window = 1000000`, `tool_calling = true`, `reasoning = true`);
+    for (const provider of enabledClouds) {
+      pushCloudPassthrough(provider);
     }
-    routes.push({
-      table: form.cloud.provider === "minimax" ? "minimax" : "cloud",
-      id: cloudRouteId(form.cloud.provider, form.cloud.modelId),
-      type: "passthrough",
-      fields: cloudFields,
-    });
 
     for (const local of localTargets) {
       const fields = [`type = "passthrough"`, `target = "${local.target}"`];
@@ -250,24 +281,17 @@ export function buildDeployment(form: SetupForm): BuiltDeployment {
       });
     }
   } else if (cloudOn && cloudTarget) {
-    const fields = [`type = "passthrough"`, `target = "strong"`];
-    if (form.cloud.provider === "minimax") {
-      fields.push(`context_window = 1000000`, `tool_calling = true`, `reasoning = true`);
+    for (const provider of enabledClouds) {
+      pushCloudPassthrough(provider);
     }
-    routes.push({
-      table: form.cloud.provider === "minimax" ? "minimax" : "cloud",
-      id: cloudRouteId(form.cloud.provider, form.cloud.modelId || "cloud"),
-      type: "passthrough",
-      fields,
-    });
-    if (cloudWeakModelId(form)) {
+    if (cloudWeakId) {
       const weakFields = [`type = "passthrough"`, `target = "weak"`];
-      if (form.cloud.provider === "minimax") {
+      if (minimaxStrong) {
         weakFields.push(`context_window = 1000000`, `tool_calling = true`, `reasoning = true`);
       }
       routes.push({
         table: "weak",
-        id: cloudRouteId(form.cloud.provider, cloudWeakModelId(form)),
+        id: cloudRouteId(strongProvider ?? "minimax", cloudWeakId),
         type: "passthrough",
         fields: weakFields,
       });
@@ -288,12 +312,7 @@ export function buildDeployment(form: SetupForm): BuiltDeployment {
   }
 
   const fallbackTarget = cloudTarget ?? localTargets[0]?.target ?? "strong";
-  ensureSmartRoute(
-    routes,
-    form,
-    fallbackTarget,
-    cloudOn && form.cloud.provider === "minimax",
-  );
+  ensureSmartRoute(routes, form, fallbackTarget, cloudOn && minimaxStrong);
 
   const lines: string[] = ["schema_version = 1", ""];
   for (const client of clients) {

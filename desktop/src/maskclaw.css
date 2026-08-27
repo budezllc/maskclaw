@@ -173,10 +173,129 @@ html.mc-root #root {
   border: 1px solid rgba(255, 255, 255, 0.18);
 }
 
+.mc-engine.live {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #6ee7b7;
+}
+
 .mc-engine.down {
   background: #3f1212;
   border-color: #f87171;
   color: #fecaca;
+}
+
+.mc-client-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.mc-client-toggle h2 {
+  margin: 0;
+}
+
+.mc-model-field {
+  min-width: 0;
+  flex: 1;
+}
+
+.mc-model-field .mc-select {
+  margin-top: 0.35rem;
+  max-width: 28rem;
+}
+
+.mc-probe-banner {
+  width: 100%;
+  max-width: 48rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.15);
+  padding: 0.9rem 1rem;
+}
+
+.mc-probe-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.mc-probe-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.mc-chip.bad {
+  border-color: #f87171;
+  color: #fecaca;
+}
+
+.mc-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+}
+
+.mc-detectors {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.mc-detector-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.mc-switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 32px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #3f3f46;
+  cursor: pointer;
+}
+
+.mc-switch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.mc-switch[aria-checked="true"] {
+  background: #fff;
+}
+
+.mc-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #f4f4f5;
+  pointer-events: none;
+  transition: transform 0.15s ease;
+}
+
+.mc-switch[aria-checked="true"] .mc-switch-thumb {
+  transform: translateX(14px);
+  background: #111;
 }
 
 .mc-btn {
@@ -416,15 +535,9 @@ html.mc-root #root {
   color: #fff;
 }
 
-.mc-provider {
-  position: relative;
-}
-
 .mc-select {
-  display: flex;
+  display: block;
   width: 100%;
-  align-items: center;
-  justify-content: space-between;
   border-radius: 0.45rem;
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: #111;
@@ -432,32 +545,13 @@ html.mc-root #root {
   font: inherit;
   padding: 0.4rem 0.65rem;
   cursor: pointer;
+  appearance: auto;
+  color-scheme: dark;
 }
 
-.mc-options {
-  list-style: none;
-  margin: 0.35rem 0 0;
-  padding: 0.2rem;
-  border-radius: 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+.mc-select option {
   background: #111;
-}
-
-.mc-options button {
-  display: block;
-  width: 100%;
-  border: 0;
-  background: transparent;
   color: #fff;
-  font: inherit;
-  text-align: left;
-  padding: 0.45rem 0.55rem;
-  cursor: pointer;
-}
-
-.mc-options button.active,
-.mc-options button:hover {
-  background: #2e2e2e;
 }
 
 .mc-app .field {
@@ -576,6 +670,22 @@ html.mc-root[data-theme="light"] .mc-engine {
   border-color: #111;
 }
 
+html.mc-root[data-theme="light"] .mc-engine.live {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(5, 150, 105, 0.45);
+  color: #047857;
+}
+
+html.mc-root[data-theme="light"] .mc-probe-banner {
+  background: rgba(245, 158, 11, 0.18);
+  color: #111;
+}
+
+html.mc-root[data-theme="light"] .mc-chip.bad {
+  color: #b91c1c;
+  border-color: #b91c1c;
+}
+
 html.mc-root[data-theme="light"] .mc-btn,
 html.mc-root[data-theme="light"] .mc-copy {
   background: #fff;
@@ -610,22 +720,18 @@ html.mc-root[data-theme="light"] .mc-tabs [role="tab"][aria-selected="true"] {
 }
 
 html.mc-root[data-theme="light"] .mc-select,
-html.mc-root[data-theme="light"] .mc-options,
 html.mc-root[data-theme="light"] .mc-app .field input,
 html.mc-root[data-theme="light"] .mc-app textarea.settings-raw,
 html.mc-root[data-theme="light"] .mc-app .settings-raw {
   background: #fff;
   color: #111;
   border-color: rgba(0, 0, 0, 0.16);
+  color-scheme: light;
 }
 
-html.mc-root[data-theme="light"] .mc-options button {
+html.mc-root[data-theme="light"] .mc-select option {
+  background: #fff;
   color: #111;
-}
-
-html.mc-root[data-theme="light"] .mc-options button.active,
-html.mc-root[data-theme="light"] .mc-options button:hover {
-  background: #ececee;
 }
 
 html.mc-root[data-theme="light"] .mc-chip {
@@ -643,4 +749,20 @@ html.mc-root[data-theme="light"] .mc-table td,
 html.mc-root[data-theme="light"] .mc-tape {
   color: #111;
   border-color: rgba(0, 0, 0, 0.08);
+}
+
+html.mc-root[data-theme="light"] .mc-switch {
+  background: #e4e4e7;
+}
+
+html.mc-root[data-theme="light"] .mc-switch[aria-checked="true"] {
+  background: #111;
+}
+
+html.mc-root[data-theme="light"] .mc-switch-thumb {
+  background: #111;
+}
+
+html.mc-root[data-theme="light"] .mc-switch[aria-checked="true"] .mc-switch-thumb {
+  background: #fff;
 }

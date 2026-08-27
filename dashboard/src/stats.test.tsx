@@ -10,7 +10,7 @@ import { EngineSettingsPage } from "./components/EngineSettingsPage";
 import { MaskPage } from "./components/MaskPage";
 import { ModelsPage } from "./components/ModelsPage";
 import type { SetupForm } from "./setupTypes";
-import { adaptMaskclawStats, assertStatsSafe, fetchStats, kindPlates } from "./stats";
+import { adaptMaskclawStats, assertStatsSafe, fetchStats, forceLocalRouteLabel, kindPlates } from "./stats";
 import { showBoxAdmin, surfaceFromEnv, surfaceFromViteMode } from "./surface";
 import pkg from "../package.json";
 
@@ -105,6 +105,11 @@ describe("stats", () => {
     expect(view.detectors.phone).toBe(false);
     expect(view.byKind[0]).toEqual(["person", 5]);
     expect(view.localRouteId).toBe("unsloth-local");
+    expect(forceLocalRouteLabel("never", "unsloth-local")).toBe("");
+    expect(forceLocalRouteLabel("always", "unsloth-local", ["lmstudio-local"])).toBe("");
+    expect(forceLocalRouteLabel("on_unmaskable", "lmstudio-local", ["lmstudio-local"])).toBe(
+      "lmstudio-local",
+    );
   });
 });
 
@@ -328,6 +333,22 @@ describe("pages", () => {
     );
     expect(screen.getByText("MASKED")).toBeTruthy();
     expect(screen.getAllByText("email").length).toBeGreaterThan(0);
+
+    cleanup();
+    render(
+      <MaskPage
+        routeIds={["maskclaw", "minimax-m3"]}
+        maskclaw={adaptMaskclawStats({
+          enabled: true,
+          force_local: "never",
+          local_route_id: "unsloth-local",
+          matches: 0,
+          requests: 8,
+        })}
+      />,
+    );
+    expect(screen.queryByText(/unsloth/i)).toBeNull();
+    expect(screen.getByText("force_local never")).toBeTruthy();
   });
 
   it("lists every track as the client model and selects maskclaw by default", async () => {

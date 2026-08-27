@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/og.png" alt="MaskClaw — On-prem privacy layer" width="800">
+  <img src="docs/maskclaw-hero.png" alt="MASKCLAW — MaskClaw privacy proxy, forked from NVIDIA NeMo Switchyard">
 </p>
 
 # MASKCLAW
