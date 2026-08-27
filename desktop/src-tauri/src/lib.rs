@@ -110,8 +110,16 @@ fn app_display_name_for(flavor: &str) -> &'static str {
     }
 }
 
-fn app_display_name() -> &'static str {
-    app_display_name_for(engine_flavor())
+fn app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+fn window_title_for(flavor: &str, version: &str) -> String {
+    format!("{} {}", app_display_name_for(flavor), version)
+}
+
+fn window_title() -> String {
+    window_title_for(engine_flavor(), app_version())
 }
 
 const X_PROFILE_URL: &str = "https://x.com/KeiSakaiX";
@@ -1226,10 +1234,16 @@ pub fn run() {
                 eprintln!("autostart enable: {err}");
             }
 
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_title(&window_title());
+            }
+
             let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
             let separator = PredefinedMenuItem::separator(app)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &separator, &quit])?;
+            // Build the tray here only. `app.trayIcon` in tauri.conf.json would
+            // spawn a second, menu-less icon on Windows.
             let tray = TrayIconBuilder::with_id("main")
                 .icon(include_image!("icons/icon.png"))
                 .menu(&menu)
@@ -1238,7 +1252,7 @@ pub fn run() {
                     Some(TrayCommand::Quit) => quit_app(app),
                     None => {}
                 })
-                .tooltip(app_display_name());
+                .tooltip(window_title());
             tray.build(app)?;
 
             let toml_exists = active_routes_path(&data_dir).exists();
@@ -1332,6 +1346,19 @@ mod tests {
         assert_eq!(tray_command("open"), Some(TrayCommand::Open));
         assert_eq!(tray_command("quit"), Some(TrayCommand::Quit));
         assert_eq!(tray_command("restart"), None);
+    }
+
+    #[test]
+    fn tauri_conf_does_not_declare_a_second_tray_icon() {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        for name in ["tauri.conf.json", "tauri.maskclaw.conf.json"] {
+            let raw = fs::read_to_string(manifest.join(name)).expect(name);
+            let json: serde_json::Value = serde_json::from_str(&raw).expect(name);
+            assert!(
+                json.pointer("/app/trayIcon").is_none(),
+                "{name} must omit app.trayIcon so setup builds a single tray with the menu"
+            );
+        }
     }
 
     #[test]
@@ -1490,6 +1517,15 @@ api_key_env = "UNSLOTH_API_KEY"
     fn maskclaw_flavor_uses_maskclaw_desktop_name() {
         assert_eq!(app_display_name_for("stock"), "Switchyard");
         assert_eq!(app_display_name_for("maskclaw"), "MASKCLAW DESKTOP");
+        assert_eq!(
+            window_title_for("maskclaw", "0.1.2"),
+            "MASKCLAW DESKTOP 0.1.2"
+        );
+        assert_eq!(window_title_for("stock", "0.1.2"), "Switchyard 0.1.2");
+        assert_eq!(
+            window_title_for("maskclaw", env!("CARGO_PKG_VERSION")),
+            format!("MASKCLAW DESKTOP {}", env!("CARGO_PKG_VERSION"))
+        );
     }
 
     #[test]
