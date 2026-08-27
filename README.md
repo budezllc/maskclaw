@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/og.png" alt="MaskClaw — On-prem privacy layer" width="800">
+  <img src="docs/maskclaw-hero.png" alt="MASKCLAW — MaskClaw privacy proxy, forked from NVIDIA NeMo Switchyard">
 </p>
 
 # MASKCLAW
@@ -12,6 +12,21 @@ Two products, one repo:
 - **MASKCLAW appliance** — Raspberry Pi 5 box on the LAN
 
 The engine under `engine/` is a Switchyard fork with the MaskClaw privacy layer. Desktop and the Pi both run that engine.
+
+## Desktop screenshots
+
+<p align="center">
+  <img src="docs/screenshots/home.png" alt="MASKCLAW DESKTOP HOME — engine live, tracks, and activity log" width="900">
+</p>
+<p align="center">
+  <img src="docs/screenshots/masked.png" alt="MASKCLAW DESKTOP MASKED — placeholder stats by kind" width="900">
+</p>
+<p align="center">
+  <img src="docs/screenshots/models.png" alt="MASKCLAW DESKTOP MODELS — cloud provider keys and routing" width="900">
+</p>
+<p align="center">
+  <img src="docs/screenshots/settings.png" alt="MASKCLAW DESKTOP SETTINGS — detectors and routes.toml" width="900">
+</p>
 
 ```text
 MASKCLAW/
