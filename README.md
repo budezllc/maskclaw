@@ -15,13 +15,13 @@ The engine under `engine/` is a Switchyard fork with the MaskClaw privacy layer.
 
 ## Screenshots
 
-![HOME](docs/screenshots/home.jpg)
+![HOME](docs/screenshots/home.png)
 
-![MASKED](docs/screenshots/masked.jpg)
+![MASKED](docs/screenshots/masked.png)
 
-![MODELS](docs/screenshots/models.jpg)
+![MODELS](docs/screenshots/models.png)
 
-![SETTINGS](docs/screenshots/settings.jpg)
+![SETTINGS](docs/screenshots/settings.png)
 
 ```text
 MASKCLAW/
