@@ -1231,7 +1231,7 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &separator, &quit])?;
             let tray = TrayIconBuilder::with_id("main")
-                .icon(include_image!("../icons/icon.png"))
+                .icon(include_image!("icons/icon.png"))
                 .menu(&menu)
                 .on_menu_event(|app, event| match tray_command(event.id.as_ref()) {
                     Some(TrayCommand::Open) => show_window(app),
@@ -1332,6 +1332,12 @@ mod tests {
         assert_eq!(tray_command("open"), Some(TrayCommand::Open));
         assert_eq!(tray_command("quit"), Some(TrayCommand::Quit));
         assert_eq!(tray_command("restart"), None);
+    }
+
+    #[test]
+    fn tray_icon_png_lives_in_the_tauri_crate() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("icons/icon.png");
+        assert!(path.is_file(), "{}", path.display());
     }
 
     #[test]
