@@ -25,6 +25,18 @@ Clone **one** repo. Build desktop, the appliance, or both.
 
 Point Cursor, Continue, Open WebUI, or any OpenAI-compatible SDK at the proxy. Use model id `maskclaw` for smart routing. Other route ids pin a backend.
 
+## Screenshots
+
+- HOME: docs/screenshots/home.jpg
+- MASKED: docs/screenshots/masked.jpg
+- MODELS: docs/screenshots/models.jpg
+- SETTINGS: docs/screenshots/settings.jpg
+
+![MaskClaw Desktop HOME](docs/screenshots/home.jpg)
+![MaskClaw Desktop MASKED](docs/screenshots/masked.jpg)
+![MaskClaw Desktop MODELS](docs/screenshots/models.jpg)
+![MaskClaw Desktop SETTINGS](docs/screenshots/settings.jpg)
+
 ## Privacy layer
 
 Built-in detectors are on by default (SETTINGS toggles write `maskclaw.toml` and restart the engine):

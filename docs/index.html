@@ -1,216 +1,247 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MASKCLAW DESKTOP — On-prem privacy layer</title>
-    <meta name="description" content="On-prem privacy proxy for OpenAI-compatible LLM clients. Prompts hit MaskClaw first. Secrets and PII become stable placeholders." />
-    <meta property="og:title" content="MASKCLAW" />
-    <meta property="og:description" content="On-prem privacy layer for OpenAI-compatible LLM clients." />
-    <meta property="og:image" content="og.png" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="theme-color" content="#000000" />
-    <link rel="icon" href="favicon.ico" sizes="any" />
-    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
-    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <style>
-      :root {
-        --bg: #000;
-        --panel: #0a0a0a;
-        --line: rgba(255, 255, 255, 0.16);
-        --text: #fff;
-        --mute: rgba(255, 255, 255, 0.62);
-        --active: #3b82f6;
-      }
-      * { box-sizing: border-box; }
-      html, body {
-        margin: 0;
-        min-height: 100%;
-        background: var(--bg);
-        color: var(--text);
-        font-family: Inter, "Segoe UI", system-ui, sans-serif;
-      }
-      .app {
-        display: flex;
-        min-height: 100vh;
-      }
-      .sidebar {
-        width: 16rem;
-        flex-shrink: 0;
-        display: flex;
-        flex-direction: column;
-        border-right: 1px solid var(--line);
-        background: var(--bg);
-      }
-      .brand {
-        display: flex;
-        align-items: center;
-        gap: 0.7rem;
-        padding: 1rem 1.1rem 0.75rem;
-      }
-      .brand img {
-        width: 40px;
-        height: 40px;
-        display: block;
-      }
-      .brand-title {
-        margin: 0;
-        font-size: 1.15rem;
-        font-weight: 600;
-        letter-spacing: 0.04em;
-      }
-      .nav {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        gap: 0.2rem;
-        padding: 0.5rem 0.65rem;
-      }
-      .nav a {
-        display: flex;
-        align-items: center;
-        gap: 0.65rem;
-        padding: 0.55rem 0.7rem;
-        border-radius: 0.5rem;
-        color: rgba(255, 255, 255, 0.82);
-        text-decoration: none;
-        font-size: 0.82rem;
-        font-weight: 600;
-        letter-spacing: 0.06em;
-      }
-      .nav a.active {
-        color: #fff;
-        background: #2e2e2e;
-        box-shadow: 0 0 0 1px var(--active);
-      }
-      .nav svg {
-        width: 1.05rem;
-        height: 1.05rem;
-        flex-shrink: 0;
-      }
-      .foot {
-        padding: 0.75rem 0.85rem 1rem;
-      }
-      .badge {
-        display: inline-block;
-        padding: 0.2rem 0.55rem;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        font-size: 0.72rem;
-        color: var(--mute);
-      }
-      main {
-        flex: 1;
-        padding: 1.5rem 1.75rem 3rem;
-        background: var(--panel);
-      }
-      .kicker {
-        margin: 0 0 0.35rem;
-        font-size: 0.72rem;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
-        color: var(--mute);
-      }
-      h1 {
-        margin: 0 0 1rem;
-        font-size: clamp(1.8rem, 4vw, 2.6rem);
-        font-weight: 700;
-        letter-spacing: 0.04em;
-      }
-      .hero {
-        display: flex;
-        gap: 1.5rem;
-        align-items: center;
-        flex-wrap: wrap;
-        margin: 0 0 1.5rem;
-      }
-      .hero img.mark {
-        width: 160px;
-        height: 160px;
-        display: block;
-        background: #000;
-      }
-      .lede {
-        margin: 0 0 0.85rem;
-        max-width: 40rem;
-        font-size: 1.05rem;
-        line-height: 1.55;
-        color: var(--text);
-      }
-      ul {
-        padding-left: 1.15rem;
-        line-height: 1.6;
-        color: var(--mute);
-      }
-      a { color: var(--active); }
-      footer {
-        margin-top: 2.5rem;
-        padding-top: 1rem;
-        border-top: 1px solid var(--line);
-        color: var(--mute);
-        font-size: 0.85rem;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="app">
-      <aside class="sidebar">
-        <div class="brand">
-          <img src="mark.png" alt="MaskClaw pick 2 mark" />
-          <p class="brand-title">MASKCLAW</p>
-        </div>
-        <nav class="nav">
-          <a class="active" href="#home">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 11.4 12 4.5l8 6.9V20h-5.5v-5.2h-5V20H4z" /></svg>
-            HOME
-          </a>
-          <a href="#masked">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3 4.8 6.2v5.5c0 4.6 3 8.8 7.2 10 4.2-1.2 7.2-5.4 7.2-10V6.2L12 3z" /></svg>
-            MASKED
-          </a>
-          <a href="#models">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 3h6v2h2.5L19 8.5V11h2v2h-2v2.5L17.5 19H15v2H9v-2H6.5L5 15.5V13H3v-2h2V8.5L6.5 5H9V3zm3 6a3 3 0 1 0 .01 6A3 3 0 0 0 12 9z" /></svg>
-            MODELS
-          </a>
-          <a href="#settings">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 7h3.1a2.7 2.7 0 0 0 5.3 0H20V5H12.4a2.7 2.7 0 0 0-5.3 0H4zm8.5 12H4v-2h8.5a2.7 2.7 0 0 0 5.3 0H20v2h-2.2a2.7 2.7 0 0 0-5.3 0z" /></svg>
-            SETTINGS
-          </a>
-        </nav>
-        <div class="foot">
-          <span class="badge">maskclaw.local</span>
-        </div>
-      </aside>
-      <main id="home">
-        <p class="kicker">MASKCLAW DESKTOP</p>
-        <h1>HOME</h1>
-        <div class="hero">
-          <img class="mark" src="mark.png" alt="MaskClaw pick 2 — gold disc, black mask, three claw slashes" />
-          <div>
-            <p class="lede">
-              On-prem privacy proxy for OpenAI-compatible LLM clients.
-              Prompts hit MaskClaw first. Secrets and PII become stable placeholders,
-              the redacted request is routed (local or cloud), then originals are restored
-              on the way back.
-            </p>
-          </div>
-        </div>
-        <ul>
-          <li><strong>MASKCLAW DESKTOP</strong> — Windows 10/11 app</li>
-          <li><strong>MASKCLAW appliance</strong> — Raspberry Pi 5 box on the LAN</li>
-        </ul>
-        <p class="lede" id="masked">
-          Source:
-          <a href="https://github.com/budezllc/maskclaw">github.com/budezllc/maskclaw</a>
-        </p>
-        <footer id="models">
-          GitHub Pages: serve <code>docs/</code> from <code>main</code>.
-          <span id="settings"></span>
-        </footer>
-      </main>
-    </div>
-  </body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MaskClaw — On-prem privacy layer</title>
+  <meta name="description" content="On-prem privacy proxy for OpenAI-compatible LLM clients. Prompts hit MaskClaw first.">
+  <link rel="icon" href="favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta property="og:title" content="MaskClaw">
+  <meta property="og:description" content="On-prem privacy layer for OpenAI-compatible LLM clients.">
+  <meta property="og:image" content="og.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600&family=Syne:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #070707;
+      --ink: #eeeae2;
+      --mute: #8f8a80;
+      --gold: #cfa440;
+      --gold-hi: #e8b844;
+      --line: rgba(207, 164, 64, 0.28);
+      --panel: #101010;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Manrope, "Segoe UI", system-ui, sans-serif;
+    }
+    body {
+      min-height: 100vh;
+      background-image:
+        radial-gradient(900px 420px at 50% -40px, rgba(207, 164, 64, 0.06), transparent 55%);
+    }
+    a { color: var(--gold-hi); text-decoration: none; }
+    a:hover { color: #f0d48a; }
+    .wrap {
+      width: min(1080px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.2rem 0 1rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      color: inherit;
+    }
+    .brand img { width: 28px; height: 28px; display: block; }
+    .brand span {
+      font-family: Syne, sans-serif;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      font-size: 0.78rem;
+    }
+    .gh {
+      font-size: 0.74rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--mute);
+      border: 1px solid var(--line);
+      padding: 0.4rem 0.8rem;
+      border-radius: 999px;
+    }
+    .gh:hover { color: var(--gold-hi); border-color: var(--gold); }
+    .hero {
+      padding: 3.4rem 0 3.2rem;
+      text-align: center;
+    }
+    .ascii {
+      margin: 0 auto;
+      display: inline-block;
+      text-align: left;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-weight: 500;
+      font-size: clamp(9px, 1.55vw, 18px);
+      line-height: 1.08;
+      letter-spacing: 0.04em;
+      color: var(--gold);
+      white-space: pre;
+      overflow-x: auto;
+      max-width: 100%;
+    }
+    .console {
+      margin: 1.15rem 0 0;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.82rem;
+      color: #c8c2b6;
+      letter-spacing: 0.02em;
+    }
+    .console .dim { color: var(--mute); }
+    .lede {
+      margin: 1.35rem auto 0;
+      max-width: 34rem;
+      color: var(--mute);
+      font-size: 1.02rem;
+      line-height: 1.65;
+    }
+    .shots { padding: 0 0 4rem; }
+    .shots h2, .split-label {
+      margin: 0 0 1.25rem;
+      font-family: Syne, sans-serif;
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--gold);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+    }
+    figure { margin: 0; }
+    .frame {
+      border: 1px solid var(--line);
+      background: #000;
+      padding: 8px;
+      box-shadow: 0 18px 40px rgba(0,0,0,0.45);
+    }
+    .frame img { display: block; width: 100%; height: auto; }
+    figcaption {
+      margin: 0.6rem 0 0;
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      font-size: 0.75rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--mute);
+    }
+    figcaption b {
+      color: var(--ink);
+      font-weight: 600;
+      font-family: Syne, sans-serif;
+    }
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+      padding: 0 0 4.2rem;
+    }
+    .card {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 1.35rem 1.4rem 1.45rem;
+      text-align: left;
+    }
+    .card h3 {
+      margin: 0 0 0.5rem;
+      font-family: Syne, sans-serif;
+      font-size: 1.02rem;
+      letter-spacing: 0.08em;
+    }
+    .card p {
+      margin: 0;
+      color: var(--mute);
+      line-height: 1.6;
+      font-size: 0.95rem;
+    }
+    footer {
+      border-top: 1px solid var(--line);
+      padding: 1.3rem 0 2.3rem;
+      color: var(--mute);
+      font-size: 0.82rem;
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    @media (max-width: 760px) {
+      .grid, .split { grid-template-columns: 1fr; }
+      .hero { padding: 2.4rem 0 2.4rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <a class="brand" href="./">
+        <img src="mark.png" alt="MaskClaw mark">
+        <span>MASKCLAW</span>
+      </a>
+      <a class="gh" href="https://github.com/budezllc/maskclaw">GitHub</a>
+    </header>
+
+    <section class="hero">
+      <pre class="ascii" aria-label="MASKCLAW">█░  █░█████░█████░█░  █░█████░█░    █████░█░  █░█░  █░
+██░██░█░  █░█░    █░ █░ █░    █░    █░  █░█░  █░█░  █░
+█░█░█░█████░█████░███░  █░    █░    █████░█░█░█░█░  █░
+█░  █░█░  █░    █░█░ █░ █░    █░    █░  █░█░█░█░█░█░█░
+█░  █░█░  █░    █░█░ █░ █░    █░    █░  █░██░██░█░█░█░
+█░  █░█░  █░█████░█░  █░█████░█████░█░  █░█░  █░ █░█░</pre>
+      <p class="console">MaskClaw privacy proxy<br><span class="dim">forked from NVIDIA NeMo Switchyard</span></p>
+      <p class="lede">Prompts hit MaskClaw first. Secrets and PII become stable placeholders, the redacted request is routed, then originals are restored on the way back.</p>
+    </section>
+
+    <section class="shots">
+      <h2>The desktop app</h2>
+      <div class="grid">
+        <figure>
+          <div class="frame"><img src="screenshots/home.jpg" alt="MaskClaw Desktop HOME screen"></div>
+          <figcaption><b>HOME</b><span>Engine, tracks, activity</span></figcaption>
+        </figure>
+        <figure>
+          <div class="frame"><img src="screenshots/masked.jpg" alt="MaskClaw Desktop MASKED screen"></div>
+          <figcaption><b>MASKED</b><span>Hits, kinds, sessions</span></figcaption>
+        </figure>
+        <figure>
+          <div class="frame"><img src="screenshots/models.jpg" alt="MaskClaw Desktop MODELS screen"></div>
+          <figcaption><b>MODELS</b><span>Cloud and local routes</span></figcaption>
+        </figure>
+        <figure>
+          <div class="frame"><img src="screenshots/settings.jpg" alt="MaskClaw Desktop SETTINGS screen"></div>
+          <figcaption><b>SETTINGS</b><span>Detectors and routes.toml</span></figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="split">
+      <div class="card">
+        <h3>Desktop</h3>
+        <p>Windows 10/11 app. HOME, MASKED, MODELS, SETTINGS. Point Cursor, Continue, Open WebUI, or any OpenAI-compatible client at the proxy.</p>
+      </div>
+      <div class="card">
+        <h3>Appliance</h3>
+        <p>Raspberry Pi 5 box on the LAN. Same privacy engine, served on the network for the rest of the desk.</p>
+      </div>
+    </section>
+
+    <footer>
+      <span>MaskClaw · privacy layer on Switchyard</span>
+      <a href="https://github.com/budezllc/maskclaw">github.com/budezllc/maskclaw</a>
+    </footer>
+  </div>
+</body>
 </html>
