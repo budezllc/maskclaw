@@ -1,12 +1,10 @@
+import { cloudApiKeyEnv, localApiKeyEnv, type SecretBinding } from "./secretMapping";
 import {
-  cloudApiKeyEnv,
-  localApiKeyEnv,
-  type SecretBinding,
-} from "./secretMapping";
-import {
+  CLOUD_ORDER,
   DEFAULT_CLOUD_URLS,
   LOCAL_ORDER,
   MINIMAX_CHINA_URL,
+  defaultClouds,
   defaultSetupForm,
   type CloudProvider,
   type LocalKind,
@@ -21,12 +19,7 @@ const CLOUD_PROVIDERS = new Set<CloudProvider>([
   "custom",
 ]);
 
-const DUMMY_SECRET_VALUES = new Set([
-  "local",
-  "lm-studio",
-  "ollama",
-  "sk-unsloth-local",
-]);
+const DUMMY_SECRET_VALUES = new Set(["local", "lm-studio", "ollama", "sk-unsloth-local"]);
 
 interface TomlTable {
   header: string;
@@ -93,12 +86,17 @@ export function formFromToml(toml: string, base: SetupForm = defaultSetupForm())
     telemetryOptIn: base.telemetryOptIn,
     smartRouteId: base.smartRouteId,
     cloud: { ...base.cloud, enabled: false },
+    clouds: defaultClouds(),
+    strongProvider: "minimax",
     locals: {
       unsloth: { ...base.locals.unsloth },
       lmstudio: { ...base.locals.lmstudio },
       gemma: { ...base.locals.gemma },
     },
   };
+  for (const provider of CLOUD_ORDER) {
+    form.clouds[provider].enabled = false;
+  }
   if (!toml.trim()) {
     return form;
   }
@@ -112,11 +110,11 @@ export function formFromToml(toml: string, base: SetupForm = defaultSetupForm())
     const baseUrl = client.fields.base_url ?? "";
     if (CLOUD_PROVIDERS.has(name as CloudProvider)) {
       const provider = name as CloudProvider;
-      form.cloud.enabled = true;
-      form.cloud.provider = provider;
-      form.cloud.baseUrl = baseUrl || DEFAULT_CLOUD_URLS[provider];
-      form.cloud.useChinaEndpoint =
-        provider === "minimax" && baseUrl.includes("minimaxi.com");
+      const entry = form.clouds[provider];
+      entry.enabled = true;
+      entry.provider = provider;
+      entry.baseUrl = baseUrl || DEFAULT_CLOUD_URLS[provider];
+      entry.useChinaEndpoint = provider === "minimax" && baseUrl.includes("minimaxi.com");
     }
     const local = localKindFromClient(name);
     if (local) {
@@ -135,10 +133,14 @@ export function formFromToml(toml: string, base: SetupForm = defaultSetupForm())
       continue;
     }
     if (CLOUD_PROVIDERS.has(llmClient as CloudProvider)) {
+      const provider = llmClient as CloudProvider;
       if (role === "weak") {
-        form.cloud.weakModelId = id;
+        form.clouds[provider].weakModelId = id;
       } else {
-        form.cloud.modelId = id;
+        form.clouds[provider].modelId = id;
+      }
+      if (role === "strong") {
+        form.strongProvider = provider;
       }
       continue;
     }
@@ -148,6 +150,11 @@ export function formFromToml(toml: string, base: SetupForm = defaultSetupForm())
     }
   }
 
+  const enabled = CLOUD_ORDER.filter((provider) => form.clouds[provider].enabled);
+  const editor = form.clouds[form.strongProvider]?.enabled
+    ? form.strongProvider
+    : (enabled[0] ?? "minimax");
+  form.cloud = { ...form.clouds[editor] };
   if (form.cloud.provider === "minimax" && form.cloud.useChinaEndpoint) {
     form.cloud.baseUrl = MINIMAX_CHINA_URL;
   }
@@ -165,29 +172,56 @@ export function formFromToml(toml: string, base: SetupForm = defaultSetupForm())
 
 export type SetupSlice = "cloud" | "locals";
 
+function withCloudEditor(form: SetupForm): SetupForm {
+  return {
+    ...form,
+    clouds: {
+      ...form.clouds,
+      [form.cloud.provider]: { ...form.cloud },
+    },
+  };
+}
+
 /** Keep the other half of a setup form when saving Cloud or Local on its own. */
 export function applySetupSlice(saved: SetupForm, slice: SetupSlice, draft: SetupForm): SetupForm {
+  const savedSynced = withCloudEditor(saved);
+  const draftSynced = withCloudEditor(draft);
   if (slice === "cloud") {
+    const provider = draftSynced.cloud.provider;
+    const clouds = {
+      ...savedSynced.clouds,
+      [provider]: { ...draftSynced.cloud },
+    };
+    const strongProvider = clouds[savedSynced.strongProvider]?.enabled
+      ? savedSynced.strongProvider
+      : (CLOUD_ORDER.find((id) => clouds[id].enabled) ?? provider);
     return {
-      telemetryOptIn: saved.telemetryOptIn,
-      smartRouteId: saved.smartRouteId,
-      cloud: { ...draft.cloud },
+      telemetryOptIn: savedSynced.telemetryOptIn,
+      cloud: { ...draftSynced.cloud },
+      clouds,
+      strongProvider:
+        draftSynced.strongProvider && clouds[draftSynced.strongProvider]?.enabled
+          ? draftSynced.strongProvider
+          : strongProvider,
       locals: {
-        unsloth: { ...saved.locals.unsloth },
-        lmstudio: { ...saved.locals.lmstudio },
-        gemma: { ...saved.locals.gemma },
+        unsloth: { ...savedSynced.locals.unsloth },
+        lmstudio: { ...savedSynced.locals.lmstudio },
+        gemma: { ...savedSynced.locals.gemma },
       },
+      smartRouteId: savedSynced.smartRouteId,
     };
   }
   return {
-    telemetryOptIn: saved.telemetryOptIn,
-    smartRouteId: saved.smartRouteId,
-    cloud: { ...saved.cloud },
+    telemetryOptIn: savedSynced.telemetryOptIn,
+    cloud: { ...savedSynced.cloud },
+    clouds: savedSynced.clouds,
+    strongProvider: savedSynced.strongProvider,
     locals: {
-      unsloth: { ...draft.locals.unsloth },
-      lmstudio: { ...draft.locals.lmstudio },
-      gemma: { ...draft.locals.gemma },
+      unsloth: { ...draftSynced.locals.unsloth },
+      lmstudio: { ...draftSynced.locals.lmstudio },
+      gemma: { ...draftSynced.locals.gemma },
     },
+    smartRouteId: savedSynced.smartRouteId,
   };
 }
 
@@ -210,6 +244,7 @@ export function applyStoredSecrets(
   const next: SetupForm = {
     ...form,
     cloud: { ...form.cloud },
+    clouds: { ...form.clouds },
     locals: {
       unsloth: { ...form.locals.unsloth },
       lmstudio: { ...form.locals.lmstudio },
@@ -217,9 +252,18 @@ export function applyStoredSecrets(
     },
   };
 
-  const cloudVal = secrets[cloudApiKeyEnv(next.cloud.provider)];
-  if (isRealSecret(cloudVal) && !isRealSecret(next.cloud.apiKey)) {
-    next.cloud.apiKey = cloudVal;
+  for (const provider of CLOUD_ORDER) {
+    const cloud = { ...next.clouds[provider] };
+    const cloudVal = secrets[cloudApiKeyEnv(provider)];
+    if (isRealSecret(cloudVal) && !isRealSecret(cloud.apiKey)) {
+      cloud.apiKey = cloudVal;
+    }
+    next.clouds[provider] = cloud;
+  }
+  next.cloud = { ...next.clouds[next.cloud.provider] };
+  const editorVal = secrets[cloudApiKeyEnv(next.cloud.provider)];
+  if (isRealSecret(editorVal) && !isRealSecret(next.cloud.apiKey)) {
+    next.cloud.apiKey = editorVal;
   }
 
   for (const kind of LOCAL_ORDER) {
@@ -241,7 +285,9 @@ export function mergeSetupState(
     ? {
         telemetryOptIn: draft.telemetryOptIn,
         smartRouteId: fromToml.smartRouteId || draft.smartRouteId,
+        strongProvider: draft.strongProvider ?? fromToml.strongProvider,
         cloud: { ...fromToml.cloud, ...draft.cloud },
+        clouds: { ...fromToml.clouds, ...draft.clouds },
         locals: {
           unsloth: { ...fromToml.locals.unsloth, ...draft.locals.unsloth },
           lmstudio: { ...fromToml.locals.lmstudio, ...draft.locals.lmstudio },
@@ -252,12 +298,40 @@ export function mergeSetupState(
   return applyStoredSecrets(merged, secrets);
 }
 
+/**
+ * Map each passthrough route id to the upstream model id the engine records in /v1/stats.
+ * Classifier routes are omitted: their answer calls land on strong/weak model ids, not the route id.
+ */
+export function backendIdsByRoute(toml: string): Record<string, string[]> {
+  const tables = parseTomlTables(toml);
+  const targetIds: Record<string, string> = {};
+  for (const table of tables) {
+    if (!table.header.startsWith("targets.")) continue;
+    const name = table.header.slice("targets.".length);
+    const id = table.fields.id;
+    if (name && id) targetIds[name] = id;
+  }
+  const mapped: Record<string, string[]> = {};
+  for (const table of tables) {
+    if (!table.header.startsWith("routes.")) continue;
+    const routeId = table.fields.id;
+    const target = table.fields.target;
+    if (!routeId || table.fields.type === "llm_classifier") continue;
+    const backend = target ? targetIds[target] : undefined;
+    if (backend) mapped[routeId] = [backend];
+  }
+  return mapped;
+}
+
 /** Keys to write to Credential Manager as soon as the user types them. */
 export function secretsToPersist(form: SetupForm): SecretBinding[] {
   const out: SecretBinding[] = [];
-  const cloudKey = form.cloud.apiKey.trim();
-  if (isRealSecret(cloudKey)) {
-    out.push({ envName: cloudApiKeyEnv(form.cloud.provider), value: cloudKey });
+  const clouds = { ...form.clouds, [form.cloud.provider]: { ...form.cloud } };
+  for (const provider of CLOUD_ORDER) {
+    const cloudKey = clouds[provider].apiKey.trim();
+    if (isRealSecret(cloudKey)) {
+      out.push({ envName: cloudApiKeyEnv(provider), value: cloudKey });
+    }
   }
   for (const kind of LOCAL_ORDER) {
     const key = form.locals[kind].apiKey.trim();

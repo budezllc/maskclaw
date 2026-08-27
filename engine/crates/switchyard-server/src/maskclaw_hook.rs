@@ -5,10 +5,10 @@
 
 use std::sync::Arc;
 
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use maskclaw::ScrubOutcome;
 use serde_json::json;
 use switchyard_protocol::Request;
@@ -22,6 +22,7 @@ pub(crate) async fn scrub_request(
     let Some(engine) = state.maskclaw.clone() else {
         return Ok(None);
     };
+    let started = std::time::Instant::now();
     let mut owned = std::mem::take(request);
     match tokio::task::spawn_blocking(move || {
         let outcome = engine.scrub_request(&mut owned);
@@ -30,6 +31,13 @@ pub(crate) async fn scrub_request(
     .await
     {
         Ok((scrubbed, outcome)) => {
+            tracing::info!(
+                target: "switchyard_server",
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                match_count = outcome.match_count,
+                force_local = outcome.force_local,
+                "maskclaw scrub finished"
+            );
             *request = scrubbed;
             Ok(Some(outcome))
         }

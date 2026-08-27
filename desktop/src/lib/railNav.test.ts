@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { MASKCLAW_NAV_ITEMS } from "./maskclawNav";
 import { RAIL_ITEMS, X_PROFILE_HANDLE, X_PROFILE_URL, defaultClientModel, isAllowedExternalUrl } from "./railNav";
@@ -10,6 +13,16 @@ describe("rail nav", () => {
   it("uses the web Yard pages for MaskClaw and never lists BOX", () => {
     expect(MASKCLAW_NAV_ITEMS.map((item) => item.label)).toEqual(["HOME", "MASKED", "MODELS", "SETTINGS"]);
     expect(MASKCLAW_NAV_ITEMS.some((item) => item.label === "BOX" || item.pane === "box")).toBe(false);
+  });
+
+  it("does not show a Yard heading under MASKCLAW", () => {
+    const src = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../components/maskclaw/MaskClawApp.tsx"),
+      "utf8",
+    );
+    expect(src).toContain("MASKCLAW");
+    expect(src).not.toMatch(/mc-group-label/);
+    expect(src).not.toMatch(/>Yard</);
   });
 
   it("links the rail X icon to KeiSakaiX", () => {

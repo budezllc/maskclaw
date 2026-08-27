@@ -66,6 +66,10 @@ describe("adaptMaskclawStats", () => {
     expect(forceLocalRouteLabel("never", "unsloth-local")).toBe("");
     expect(forceLocalRouteLabel("always", "unsloth-local", ["lmstudio-local"])).toBe("");
     expect(forceLocalRouteLabel("always", "lmstudio-local", ["lmstudio-local"])).toBe("lmstudio-local");
+    expect(forceLocalRouteLabel("always", "unsloth-local", ["unsloth-local"])).toBe("unsloth-local");
+    expect(forceLocalRouteLabel("on_unmaskable", "unsloth-local", ["unsloth-local", "minimax-m3"])).toBe(
+      "unsloth-local",
+    );
   });
 
   it("tolerates null", () => {

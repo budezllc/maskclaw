@@ -23,7 +23,7 @@ extra_body = { chat_template_kwargs = { enable_thinking = false } }
 id = "switchyard"
 type = "llm_classifier"
 mode = "capability"
-classifier_target = "weak"
+classifier_target = "strong"
 strong_target = "strong"
 weak_target = "weak"
 base_threshold = 0.5
@@ -35,7 +35,7 @@ tool_calling = true
 reasoning = true
 
 [routes.minimax]
-id = "minimax-m3"
+id = "MiniMax-M3"
 type = "passthrough"
 target = "strong"
 context_window = 1000000

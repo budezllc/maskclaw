@@ -4,10 +4,12 @@ import { loadSetupSecrets, persistSecrets, probeBackend, saveSetup } from "../ap
 import { readSetupDraft, writeSetupDraft } from "../lib/setupDraft";
 import { formFromToml, mergeSetupState, secretsToPersist } from "../lib/setupHydrate";
 import {
+  CLOUD_ORDER,
   DEFAULT_CLOUD_MODELS,
   DEFAULT_CLOUD_URLS,
   LOCALS,
   PROVIDERS,
+  defaultClouds,
   defaultSetupForm,
   type CloudProvider,
   type LocalKind,
@@ -118,16 +120,22 @@ export function SetupWizard({ configToml, appName = "Switchyard", onDone }: Prop
                 value={form.cloud.provider}
                 onChange={(e) => {
                   const provider = e.target.value as CloudProvider;
-                  updateForm((prev) => ({
-                    ...prev,
-                    cloud: {
+                  updateForm((prev) => {
+                    const clouds = defaultClouds();
+                    for (const id of CLOUD_ORDER) {
+                      clouds[id].enabled = false;
+                    }
+                    const cloud = {
                       ...prev.cloud,
                       provider,
                       modelId: DEFAULT_CLOUD_MODELS[provider],
                       weakModelId: "",
                       baseUrl: DEFAULT_CLOUD_URLS[provider],
-                    },
-                  }));
+                      useChinaEndpoint: provider === "minimax" ? prev.cloud.useChinaEndpoint : false,
+                    };
+                    clouds[provider] = { ...cloud };
+                    return { ...prev, cloud, clouds, strongProvider: provider };
+                  });
                 }}
               >
                 {PROVIDERS.map((p) => (

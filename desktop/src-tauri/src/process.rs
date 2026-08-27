@@ -7,6 +7,25 @@ use std::time::Duration;
 
 pub const LOG_CAP: usize = 200;
 
+/// Hide the engine console. DETACHED_PROCESS so a console-subsystem sidecar
+/// never flashes conhost; CREATE_NO_WINDOW covers netstat/taskkill too.
+#[cfg(windows)]
+pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(windows)]
+pub const DETACHED_PROCESS: u32 = 0x0000_0008;
+#[cfg(windows)]
+pub const ENGINE_CHILD_SPAWN_FLAGS: u32 = CREATE_NO_WINDOW | DETACHED_PROCESS;
+
+pub fn apply_no_window(cmd: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(ENGINE_CHILD_SPAWN_FLAGS);
+        cmd.stdin(Stdio::null());
+    }
+    let _ = cmd;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EngineState {
@@ -92,13 +111,7 @@ impl RealChild {
             .envs(env.iter().cloned())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
-        }
+        apply_no_window(&mut cmd);
         let mut child = cmd.spawn()?;
         if let Some(stdout) = child.stdout.take() {
             spawn_pipe_reader(stdout, logs.clone());
@@ -234,5 +247,16 @@ mod tests {
         assert_eq!(mgr.state, EngineState::Failed);
         assert!(mgr.child.is_none());
         assert_eq!(mgr.last_error.as_deref(), Some("boom"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn engine_child_spawn_flags_hide_the_console() {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        assert_eq!(
+            ENGINE_CHILD_SPAWN_FLAGS,
+            CREATE_NO_WINDOW | DETACHED_PROCESS
+        );
     }
 }

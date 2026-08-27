@@ -6,7 +6,7 @@ export interface MaskclawNavItem {
   icon: "home" | "mask" | "models" | "settings";
 }
 
-/** Desktop MaskClaw nav matches the web dashboard Yard group, minus BOX (appliance-only). */
+/** Desktop MaskClaw nav matches the web dashboard pages, minus BOX (appliance-only). */
 export const MASKCLAW_NAV_ITEMS: MaskclawNavItem[] = [
   { pane: "board", label: "HOME", icon: "home" },
   { pane: "mask", label: "MASKED", icon: "mask" },
