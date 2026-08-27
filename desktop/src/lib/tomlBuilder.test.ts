@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { assertNoSecretsInToml, secretsFromSetup } from "./secretMapping";
+import { applySetupSlice, formFromToml } from "./setupHydrate";
 import { buildDeployment, collectUsedPairs } from "./tomlBuilder";
 import { defaultSetupForm, type SetupForm } from "./setupTypes";
 
@@ -152,7 +153,30 @@ describe("buildDeployment", () => {
   it("rejects a missing strong model id", () => {
     const form = defaultSetupForm();
     form.cloud.modelId = "  ";
-    expect(() => buildDeployment(form)).toThrow(/strong model/i);
+    expect(() => buildDeployment(form)).toThrow(/model id for minimax/i);
+  });
+
+  it("keeps every saved cloud in routes.toml so each one is a selectable model", () => {
+    const saved = formFromToml(load("minimax-unsloth.toml"));
+    const openaiDraft = defaultSetupForm();
+    openaiDraft.cloud = {
+      enabled: true,
+      provider: "openai",
+      apiKey: "sk-openai-not-real",
+      useChinaEndpoint: false,
+      modelId: "gpt-4o",
+      weakModelId: "",
+      baseUrl: "https://api.openai.com/v1",
+    };
+    openaiDraft.strongProvider = "minimax";
+    const merged = applySetupSlice(saved, "cloud", openaiDraft);
+    expect(merged.clouds.minimax.enabled).toBe(true);
+    expect(merged.clouds.openai.enabled).toBe(true);
+    const built = buildDeployment(merged);
+    expect(built.toml).toContain("[llm_clients.openai]");
+    expect(built.toml).toMatch(/id = "MiniMax-M3"/);
+    expect(built.toml).toMatch(/id = "gpt-4o"/);
+    expect(built.toml).not.toMatch(/id = "minimax-m3"/);
   });
 
   it("keeps a maskclaw auto-route id instead of rewriting switchyard", () => {

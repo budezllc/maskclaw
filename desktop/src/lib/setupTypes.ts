@@ -26,11 +26,23 @@ export interface LocalForm {
 
 export interface SetupForm {
   cloud: CloudForm;
+  /** Every cloud provider that has been saved. `cloud` is the one currently edited. */
+  clouds: Record<CloudProvider, CloudForm>;
+  /** Cloud used as classifier strong / smart-routing fallback. */
+  strongProvider: CloudProvider;
   locals: Record<LocalKind, LocalForm>;
   telemetryOptIn: boolean;
   /** Route id clients send for auto-routing (`routes.smart`). */
   smartRouteId: string;
 }
+
+export const CLOUD_ORDER: CloudProvider[] = [
+  "minimax",
+  "openrouter",
+  "openai",
+  "anthropic",
+  "custom",
+];
 
 export const DEFAULT_CLOUD_URLS: Record<CloudProvider, string> = {
   minimax: "https://api.minimax.io/v1",
@@ -49,6 +61,29 @@ export const DEFAULT_CLOUD_MODELS: Record<CloudProvider, string> = {
   anthropic: "",
   custom: "",
 };
+
+export function emptyCloudForm(provider: CloudProvider): CloudForm {
+  return {
+    enabled: false,
+    provider,
+    apiKey: "",
+    useChinaEndpoint: false,
+    modelId: DEFAULT_CLOUD_MODELS[provider],
+    weakModelId: "",
+    baseUrl: DEFAULT_CLOUD_URLS[provider],
+  };
+}
+
+export function defaultClouds(): Record<CloudProvider, CloudForm> {
+  const minimax = { ...emptyCloudForm("minimax"), enabled: true };
+  return {
+    minimax,
+    openrouter: emptyCloudForm("openrouter"),
+    openai: emptyCloudForm("openai"),
+    anthropic: emptyCloudForm("anthropic"),
+    custom: emptyCloudForm("custom"),
+  };
+}
 
 export const DEFAULT_LOCALS: Record<LocalKind, LocalForm> = {
   unsloth: {
@@ -72,16 +107,11 @@ export const DEFAULT_LOCALS: Record<LocalKind, LocalForm> = {
 };
 
 export function defaultSetupForm(): SetupForm {
+  const clouds = defaultClouds();
   return {
-    cloud: {
-      enabled: true,
-      provider: "minimax",
-      apiKey: "",
-      useChinaEndpoint: false,
-      modelId: DEFAULT_CLOUD_MODELS.minimax,
-      weakModelId: "",
-      baseUrl: DEFAULT_CLOUD_URLS.minimax,
-    },
+    cloud: { ...clouds.minimax },
+    clouds,
+    strongProvider: "minimax",
     locals: {
       unsloth: { ...DEFAULT_LOCALS.unsloth },
       lmstudio: { ...DEFAULT_LOCALS.lmstudio },
@@ -119,3 +149,7 @@ export const LOCALS: { id: LocalKind; label: string }[] = [
   { id: "lmstudio", label: "LM Studio" },
   { id: "gemma", label: "Gemma / Ollama" },
 ];
+
+export function providerLabel(id: CloudProvider): string {
+  return PROVIDERS.find((provider) => provider.id === id)?.label ?? id;
+}

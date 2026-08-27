@@ -12,12 +12,12 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use process::{EngineState, ManagedChild, ProcessManager, RealChild};
+use process::{apply_no_window, EngineState, ManagedChild, ProcessManager, RealChild};
 use secrets::SecretBinding;
 use tauri::include_image;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 
 const LISTEN_HOST: &str = "127.0.0.1";
@@ -25,12 +25,15 @@ const LISTEN_PORT: u16 = 4000;
 const SHUTDOWN_TIMEOUT_SECS: u64 = 30;
 const HTTP_TIMEOUT_MS: u64 = 1500;
 const HTTP_CONNECT_TIMEOUT_MS: u64 = 500;
+const MODELS_PROBE_TIMEOUT_MS: u64 = 8000;
+const MODEL_TEST_TIMEOUT_MS: u64 = 12000;
 const DRY_RUN_TIMEOUT_SECS: u64 = 15;
 const PORT_PROBE_TIMEOUT_MS: u64 = 200;
+#[cfg(windows)]
+const WINDOWS_CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const DEFAULT_MASKCLAW_TOML: &str = r#"enabled = true
 session_ttl_secs = 900
 force_local = "never"
-local_route_id = "local"
 
 [detectors]
 email = true
@@ -121,7 +124,7 @@ fn open_in_default_browser(url: &str) -> Result<(), String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const CREATE_NO_WINDOW: u32 = WINDOWS_CREATE_NO_WINDOW;
         Command::new("cmd")
             .args(["/C", "start", "", url])
             .creation_flags(CREATE_NO_WINDOW)
@@ -383,11 +386,7 @@ fn run_dry_run(data_dir: &Path, env: &[(String, String)]) -> Result<(), String> 
         .envs(env.iter().cloned())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-    }
+    apply_no_window(&mut cmd);
     let child = cmd.spawn().map_err(|e| {
         format!("Could not run the routing engine ({e}). In dev, put switchyard-server on PATH.")
     })?;
@@ -427,11 +426,12 @@ fn run_dry_run(data_dir: &Path, env: &[(String, String)]) -> Result<(), String> 
 fn kill_pid(pid: u32) {
     #[cfg(windows)]
     {
-        let _ = Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/F"])
+        let mut cmd = Command::new("taskkill");
+        cmd.args(["/PID", &pid.to_string(), "/F"])
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+            .stderr(Stdio::null());
+        apply_no_window(&mut cmd);
+        let _ = cmd.status();
     }
     #[cfg(unix)]
     {
@@ -476,16 +476,9 @@ fn decide_start(has_live_child: bool, port_already_bound: bool) -> StartDecision
     }
 }
 
-fn pid_listening_on(port: u16) -> Option<u32> {
-    let output = Command::new("netstat")
-        .args(["-ano", "-p", "tcp"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
+fn parse_listening_pid(netstat: &str, port: u16) -> Option<u32> {
     let suffix = format!(":{port}");
-    for line in text.lines() {
+    for line in netstat.lines() {
         let line = line.trim();
         if !line.starts_with("TCP") || !line.contains("LISTENING") {
             continue;
@@ -501,15 +494,36 @@ fn pid_listening_on(port: u16) -> Option<u32> {
     None
 }
 
+fn pid_listening_on(port: u16) -> Option<u32> {
+    let mut cmd = Command::new("netstat");
+    cmd.args(["-ano", "-p", "tcp"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    apply_no_window(&mut cmd);
+    let output = cmd.output().ok()?;
+    parse_listening_pid(&String::from_utf8_lossy(&output.stdout), port)
+}
+
+fn wait_listen_port_free(timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if !listen_port_busy() {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn free_listen_port() {
+    if wait_listen_port_free(Duration::from_millis(1000)) {
+        return;
+    }
     if let Some(pid) = pid_listening_on(LISTEN_PORT) {
         kill_pid(pid);
-        for _ in 0..20 {
-            if !listen_port_busy() {
-                break;
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
+        let _ = wait_listen_port_free(Duration::from_millis(1000));
     }
 }
 
@@ -570,18 +584,36 @@ fn spawn_locked(inner: &mut AppInner, env: &[(String, String)]) -> Result<(), St
     }
 }
 
-fn start_locked(inner: &mut AppInner) -> Result<(), String> {
+fn start_locked_with_dry_run(inner: &mut AppInner, dry_run: bool) -> Result<(), String> {
     match prepare_start(inner)? {
         PreparedStart::Finished => Ok(()),
         PreparedStart::Spawn { env } => {
-            let data_dir = inner.data_dir.clone();
-            if let Err(err) = run_dry_run(&data_dir, &env) {
-                inner.manager.mark_failed(err.clone());
-                return Err(err);
+            if dry_run {
+                let data_dir = inner.data_dir.clone();
+                if let Err(err) = run_dry_run(&data_dir, &env) {
+                    inner.manager.mark_failed(err.clone());
+                    return Err(err);
+                }
             }
             spawn_locked(inner, &env)
         }
     }
+}
+
+fn restart_locked(inner: &mut AppInner) -> Result<(), String> {
+    restart_locked_with_dry_run(inner, true)
+}
+
+fn restart_locked_with_dry_run(inner: &mut AppInner, dry_run: bool) -> Result<(), String> {
+    inner.manager.restart_begin();
+    stop_locked(inner)?;
+    start_locked_with_dry_run(inner, dry_run)
+}
+
+/// Detector toggles rewrite maskclaw.toml; skip an extra `--dry-run` sidecar so
+/// Windows does not flash a second console. Routes saves still dry-run.
+fn maskclaw_save_runs_dry_run() -> bool {
+    false
 }
 
 fn start_engine_now(mutex: &Mutex<AppInner>) -> Result<(), String> {
@@ -609,12 +641,6 @@ fn stop_locked(inner: &mut AppInner) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-fn restart_locked(inner: &mut AppInner) -> Result<(), String> {
-    inner.manager.restart_begin();
-    stop_locked(inner)?;
-    start_locked(inner)
-}
-
 fn write_toml_and_restart(
     inner: &mut AppInner,
     toml: &str,
@@ -625,8 +651,97 @@ fn write_toml_and_restart(
     }
     secrets::store_secrets(secrets)?;
     fs::write(active_routes_path(&inner.data_dir), toml).map_err(|e| e.to_string())?;
+    if is_maskclaw_build() {
+        let sidecar_path = active_maskclaw_path(&inner.data_dir);
+        if sidecar_path.is_file() {
+            let sidecar = fs::read_to_string(&sidecar_path).map_err(|e| e.to_string())?;
+            let synced = sync_maskclaw_local_route(&sidecar, toml);
+            if synced != sidecar {
+                fs::write(&sidecar_path, synced).map_err(|e| e.to_string())?;
+            }
+        }
+    }
     write_settings(&inner.data_dir, inner.telemetry_opt_in, true)?;
     restart_locked(inner)
+}
+
+const LOCAL_ROUTE_IDS: [&str; 3] = ["unsloth-local", "lmstudio-local", "gemma-local"];
+
+fn live_local_route_ids(routes_toml: &str) -> Vec<&'static str> {
+    LOCAL_ROUTE_IDS
+        .into_iter()
+        .filter(|id| {
+            routes_toml
+                .lines()
+                .any(|line| line.trim() == format!("id = \"{id}\""))
+        })
+        .collect()
+}
+
+fn current_local_route_id(maskclaw_toml: &str) -> String {
+    for line in maskclaw_toml.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            break;
+        }
+        let Some(rest) = trimmed.strip_prefix("local_route_id") else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let Some(rest) = rest.strip_prefix('=') else {
+            continue;
+        };
+        return rest.trim().trim_matches('"').to_string();
+    }
+    String::new()
+}
+
+fn sync_maskclaw_local_route(maskclaw_toml: &str, routes_toml: &str) -> String {
+    let live = live_local_route_ids(routes_toml);
+    let current = current_local_route_id(maskclaw_toml);
+    let next = if live.iter().any(|id| *id == current.as_str()) {
+        current
+    } else {
+        live.first().copied().unwrap_or("").to_string()
+    };
+    set_top_level_toml_string(maskclaw_toml, "local_route_id", &next)
+}
+
+fn set_top_level_toml_string(toml: &str, key: &str, value: &str) -> String {
+    let prefix = format!("{key} =");
+    let mut out = Vec::new();
+    let mut saw_table = false;
+    let mut replaced = false;
+    for line in toml.lines() {
+        let trimmed = line.trim();
+        if !saw_table && trimmed.starts_with('[') {
+            if !replaced && !value.is_empty() {
+                out.push(format!("{key} = \"{value}\""));
+                replaced = true;
+            }
+            saw_table = true;
+        }
+        if !saw_table && trimmed.starts_with(&prefix) {
+            replaced = true;
+            if value.is_empty() {
+                continue;
+            }
+            out.push(format!("{key} = \"{value}\""));
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    if !replaced && !value.is_empty() {
+        if !out.is_empty() && !out.last().is_some_and(|line| line.is_empty()) {
+            out.push(String::new());
+        }
+        out.push(format!("{key} = \"{value}\""));
+    }
+    let mut joined = out.join("\n");
+    if toml.ends_with('\n') && !joined.ends_with('\n') {
+        joined.push('\n');
+    }
+    joined
 }
 
 #[tauri::command]
@@ -736,7 +851,7 @@ async fn save_raw_maskclaw_toml(app: AppHandle, toml: String) -> Result<Snapshot
     }
     with_manager(app, move |app, inner| {
         write_maskclaw_toml(&inner.data_dir, engine_flavor(), &toml)?;
-        restart_locked(inner)?;
+        restart_locked_with_dry_run(inner, maskclaw_save_runs_dry_run())?;
         Ok(snapshot_locked(app, inner))
     })
     .await
@@ -822,8 +937,16 @@ fn stats_reset_url() -> String {
 }
 
 async fn http_get_auth(url: &str, bearer: Option<&str>) -> Result<(u16, String), String> {
+    http_get_auth_timeout(url, bearer, HTTP_TIMEOUT_MS).await
+}
+
+async fn http_get_auth_timeout(
+    url: &str,
+    bearer: Option<&str>,
+    timeout_ms: u64,
+) -> Result<(u16, String), String> {
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(HTTP_TIMEOUT_MS))
+        .timeout(Duration::from_millis(timeout_ms))
         .connect_timeout(Duration::from_millis(HTTP_CONNECT_TIMEOUT_MS))
         .build()
         .map_err(|e| e.to_string())?;
@@ -835,6 +958,45 @@ async fn http_get_auth(url: &str, bearer: Option<&str>) -> Result<(u16, String),
     let status = resp.status().as_u16();
     let body = resp.text().await.map_err(|e| e.to_string())?;
     Ok((status, body))
+}
+
+fn models_probe_url(url: &str) -> String {
+    let base = url.trim_end_matches('/');
+    if base.ends_with("/v1") {
+        format!("{base}/models")
+    } else {
+        format!("{base}/v1/models")
+    }
+}
+
+fn completions_probe_url(url: &str) -> String {
+    let base = url.trim_end_matches('/');
+    if base.ends_with("/v1") {
+        format!("{base}/chat/completions")
+    } else {
+        format!("{base}/v1/chat/completions")
+    }
+}
+
+async fn http_post_json_auth(
+    url: &str,
+    bearer: Option<&str>,
+    body: serde_json::Value,
+    timeout_ms: u64,
+) -> Result<(u16, String), String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(timeout_ms))
+        .connect_timeout(Duration::from_millis(HTTP_CONNECT_TIMEOUT_MS))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut req = client.post(url).json(&body);
+    if let Some(token) = bearer.filter(|token| !token.is_empty()) {
+        req = req.bearer_auth(token);
+    }
+    let resp = req.send().await.map_err(|e| e.to_string())?;
+    let status = resp.status().as_u16();
+    let text = resp.text().await.map_err(|e| e.to_string())?;
+    Ok((status, text))
 }
 
 #[tauri::command]
@@ -888,13 +1050,12 @@ async fn fetch_models() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-async fn probe_backend(app: AppHandle, url: String, api_key: Option<String>) -> ProbeResult {
-    let base = url.trim_end_matches('/');
-    let models_url = if base.ends_with("/v1") {
-        format!("{base}/models")
-    } else {
-        format!("{base}/v1/models")
-    };
+async fn probe_backend(
+    app: AppHandle,
+    url: String,
+    api_key: Option<String>,
+    model: Option<String>,
+) -> ProbeResult {
     let stored = (|| {
         let state = app.try_state::<AppState>()?;
         let inner = state.0.lock().ok()?;
@@ -903,18 +1064,57 @@ async fn probe_backend(app: AppHandle, url: String, api_key: Option<String>) -> 
         secrets::load_secret(&env_name).ok().flatten()
     })();
     let bearer = probe_bearer(api_key, stored);
-    match http_get_auth(&models_url, bearer.as_deref()).await {
+    let model_id = model
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(model_id) = model_id {
+        let target = completions_probe_url(&url);
+        let payload = serde_json::json!({
+            "model": model_id,
+            "messages": [{ "role": "user", "content": "ping" }],
+            "max_tokens": 1,
+            "stream": false
+        });
+        return match http_post_json_auth(&target, bearer.as_deref(), payload, MODEL_TEST_TIMEOUT_MS)
+            .await
+        {
+            Ok((status, _)) if (200..300).contains(&status) => ProbeResult {
+                url: target,
+                ok: true,
+                label: "Model works".into(),
+                detail: format!("HTTP {status}"),
+                models: vec![model_id.to_string()],
+            },
+            Ok((status, _)) => ProbeResult {
+                url: target,
+                ok: false,
+                label: if status == 400 || status == 404 {
+                    "Unknown model".into()
+                } else {
+                    "Unreachable".into()
+                },
+                detail: format!("HTTP {status}"),
+                models: vec![],
+            },
+            Err(err) => ProbeResult {
+                url: target,
+                ok: false,
+                label: "Unreachable".into(),
+                detail: err,
+                models: vec![],
+            },
+        };
+    }
+    let models_url = models_probe_url(&url);
+    match http_get_auth_timeout(&models_url, bearer.as_deref(), MODELS_PROBE_TIMEOUT_MS).await {
         Ok((status, body)) if (200..300).contains(&status) => {
             let models = extract_model_ids(&body);
             ProbeResult {
                 url: models_url,
                 ok: true,
                 label: "Found".into(),
-                detail: if models.is_empty() {
-                    "answered /v1/models".into()
-                } else {
-                    format!("loaded {}", models.join(", "))
-                },
+                detail: probe_ok_detail(status),
                 models,
             }
         }
@@ -935,6 +1135,11 @@ async fn probe_backend(app: AppHandle, url: String, api_key: Option<String>) -> 
     }
 }
 
+/// Match the appliance probe: Found + status code, not the full model catalog.
+fn probe_ok_detail(status: u16) -> String {
+    status.to_string()
+}
+
 fn extract_model_ids(body: &str) -> Vec<String> {
     let Ok(json) = serde_json::from_str::<serde_json::Value>(body) else {
         return Vec::new();
@@ -947,6 +1152,37 @@ fn extract_model_ids(body: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Tray layout: Open, a divider, then Quit. Restart stays on HOME, not here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+enum TrayMenuPart {
+    Item(&'static str, &'static str),
+    Separator,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn tray_menu_spec() -> &'static [TrayMenuPart] {
+    &[
+        TrayMenuPart::Item("open", "Open"),
+        TrayMenuPart::Separator,
+        TrayMenuPart::Item("quit", "Quit"),
+    ]
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TrayCommand {
+    Open,
+    Quit,
+}
+
+fn tray_command(id: &str) -> Option<TrayCommand> {
+    match id {
+        "open" => Some(TrayCommand::Open),
+        "quit" => Some(TrayCommand::Quit),
+        _ => None,
+    }
 }
 
 fn show_window(app: &AppHandle) {
@@ -991,27 +1227,16 @@ pub fn run() {
             }
 
             let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
-            let restart = MenuItem::with_id(app, "restart", "Restart", true, None::<&str>)?;
+            let separator = PredefinedMenuItem::separator(app)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &restart, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &separator, &quit])?;
             let tray = TrayIconBuilder::with_id("main")
                 .icon(include_image!("../icons/icon.png"))
                 .menu(&menu)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "open" => show_window(app),
-                    "restart" => {
-                        let handle = app.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let _ = with_manager(handle.clone(), |app, inner| {
-                                restart_locked(inner)?;
-                                let _ = app.emit("engine-state", "restarted");
-                                Ok(())
-                            })
-                            .await;
-                        });
-                    }
-                    "quit" => quit_app(app),
-                    _ => {}
+                .on_menu_event(|app, event| match tray_command(event.id.as_ref()) {
+                    Some(TrayCommand::Open) => show_window(app),
+                    Some(TrayCommand::Quit) => quit_app(app),
+                    None => {}
                 })
                 .tooltip(app_display_name());
             tray.build(app)?;
@@ -1092,6 +1317,24 @@ mod tests {
     }
 
     #[test]
+    fn tray_menu_is_open_separator_quit() {
+        assert_eq!(
+            tray_menu_spec(),
+            &[
+                TrayMenuPart::Item("open", "Open"),
+                TrayMenuPart::Separator,
+                TrayMenuPart::Item("quit", "Quit"),
+            ]
+        );
+        assert!(tray_menu_spec().iter().all(|part| {
+            !matches!(part, TrayMenuPart::Item("restart", _) | TrayMenuPart::Item(_, "Restart"))
+        }));
+        assert_eq!(tray_command("open"), Some(TrayCommand::Open));
+        assert_eq!(tray_command("quit"), Some(TrayCommand::Quit));
+        assert_eq!(tray_command("restart"), None);
+    }
+
+    #[test]
     fn start_replaces_an_already_bound_listen_port() {
         assert_eq!(
             decide_start(false, true),
@@ -1099,6 +1342,18 @@ mod tests {
         );
         assert_eq!(decide_start(true, true), StartDecision::AlreadyManaged);
         assert_eq!(decide_start(false, false), StartDecision::Spawn);
+    }
+
+    #[test]
+    fn detector_save_skips_dry_run_console_spawn() {
+        assert!(!maskclaw_save_runs_dry_run());
+    }
+
+    #[test]
+    fn netstat_parse_finds_listen_pid() {
+        let sample = "\r\n  TCP    127.0.0.1:4000         0.0.0.0:0              LISTENING       4242\r\n";
+        assert_eq!(parse_listening_pid(sample, 4000), Some(4242));
+        assert_eq!(parse_listening_pid(sample, 4001), None);
     }
 
     #[test]
@@ -1133,6 +1388,28 @@ api_key_env = "UNSLOTH_API_KEY"
             Some("sk-stored")
         );
         assert_eq!(probe_bearer(None, None), None);
+    }
+
+    #[test]
+    fn probe_urls_append_models_or_chat_completions() {
+        assert_eq!(
+            models_probe_url("http://127.0.0.1:8888/v1"),
+            "http://127.0.0.1:8888/v1/models"
+        );
+        assert_eq!(
+            completions_probe_url("https://api.minimax.io/v1"),
+            "https://api.minimax.io/v1/chat/completions"
+        );
+        assert_eq!(
+            completions_probe_url("https://api.openai.com"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn probe_success_note_is_the_status_not_every_model_id() {
+        assert_eq!(probe_ok_detail(200), "200");
+        assert!(!probe_ok_detail(200).contains("loaded"));
     }
 
     #[test]
@@ -1263,8 +1540,24 @@ api_key_env = "UNSLOTH_API_KEY"
         let body = fs::read_to_string(&dest).expect("read");
         assert!(body.contains("enabled = true"));
         assert!(body.contains("[detectors]"));
+        assert!(!body.contains("unsloth"));
+        assert!(!body.contains("local_route_id"));
         seed_maskclaw_file(&dest, "maskclaw").expect("idempotent");
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sync_drops_stale_unsloth_local_route() {
+        let sidecar = "enabled = true\nforce_local = \"never\"\nlocal_route_id = \"unsloth-local\"\n\n[detectors]\nemail = true\n";
+        let routes = "schema_version = 1\n[routes.minimax]\nid = \"minimax-m3\"\n";
+        let synced = sync_maskclaw_local_route(sidecar, routes);
+        assert!(!synced.contains("unsloth"));
+        assert!(!synced.contains("local_route_id"));
+        let keep = sync_maskclaw_local_route(
+            sidecar,
+            "schema_version = 1\n[routes.local]\nid = \"unsloth-local\"\n",
+        );
+        assert!(keep.contains("unsloth-local"));
     }
 
     #[test]
@@ -1289,6 +1582,12 @@ api_key_env = "UNSLOTH_API_KEY"
         write_maskclaw_toml_at(&dest, "maskclaw", "enabled = false\n").expect("write");
         assert_eq!(fs::read_to_string(&dest).expect("read"), "enabled = false\n");
         let _ = fs::remove_file(dest);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn hidden_console_flag_is_create_no_window() {
+        assert_eq!(WINDOWS_CREATE_NO_WINDOW, 0x0800_0000);
     }
 }
 

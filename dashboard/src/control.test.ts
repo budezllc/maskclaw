@@ -6,6 +6,8 @@ import {
   extractBaseUrls,
   parseDetectors,
   setDetectorLine,
+  setTopLevelTomlString,
+  syncMaskclawLocalRoute,
   tailJsonl,
   tomlContainsLiteralSecret,
 } from "./tomlEdit";
@@ -75,11 +77,36 @@ base_url = "http://127.0.0.1:8888/v1"
     ]);
     expect(tailJsonl("a\nb\nc\n", 2)).toEqual(["b", "c"]);
   });
+
+  it("drops a stale unsloth-local pin when routes.toml no longer has that route", () => {
+    const sidecar = `enabled = true
+force_local = "never"
+local_route_id = "unsloth-local"
+
+[detectors]
+email = true
+`;
+    const routes = `
+schema_version = 1
+[routes.minimax]
+id = "minimax-m3"
+`;
+    const synced = syncMaskclawLocalRoute(sidecar, routes);
+    expect(synced).not.toMatch(/unsloth-local/);
+    expect(synced).toContain("[detectors]");
+    expect(setTopLevelTomlString(sidecar, "local_route_id", "lmstudio-local")).toContain(
+      'local_route_id = "lmstudio-local"',
+    );
+  });
 });
 
 describe("control", () => {
   it("saves routes.toml and restarts, rejecting literal secrets", async () => {
     const control = io();
+    await control.writeMaskclaw(`enabled = true
+force_local = "never"
+local_route_id = "unsloth-local"
+`);
     const probed = await handleControl({ method: "POST", pathname: "/control/probe", body: "{}" }, control);
     expect(probed.status).toBe(200);
     expect(probed.json).toMatchObject({ results: [{ ok: true }] });
@@ -89,6 +116,7 @@ describe("control", () => {
     );
     expect(saved.status).toBe(200);
     expect(control.restartEngine).toHaveBeenCalledOnce();
+    expect(await control.readMaskclaw()).not.toMatch(/unsloth/);
 
     const rejected = await handleControl(
       {

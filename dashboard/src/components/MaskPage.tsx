@@ -2,9 +2,15 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { MetricCard } from "@/components/MetricCard";
-import type { MaskclawStatsView } from "@/stats";
+import { forceLocalRouteLabel, type MaskclawStatsView } from "@/stats";
 
-export function MaskPage({ maskclaw }: { maskclaw: MaskclawStatsView | null }) {
+export function MaskPage({
+  maskclaw,
+  routeIds = [],
+}: {
+  maskclaw: MaskclawStatsView | null;
+  routeIds?: string[];
+}) {
   if (!maskclaw) {
     return (
       <Empty>
@@ -24,6 +30,8 @@ export function MaskPage({ maskclaw }: { maskclaw: MaskclawStatsView | null }) {
       </div>
     );
   }
+
+  const localRoute = forceLocalRouteLabel(maskclaw.forceLocal, maskclaw.localRouteId, routeIds);
 
   return (
     <div className="flex min-w-0 max-w-full flex-col gap-6">
@@ -80,9 +88,7 @@ export function MaskPage({ maskclaw }: { maskclaw: MaskclawStatsView | null }) {
 
       <div className="flex flex-wrap gap-2">
         <Badge variant="outline">force_local {maskclaw.forceLocal}</Badge>
-        {maskclaw.localRouteId ? (
-          <Badge variant="secondary">local route {maskclaw.localRouteId}</Badge>
-        ) : null}
+        {localRoute ? <Badge variant="secondary">local route {localRoute}</Badge> : null}
         <Badge variant="outline">ttl {maskclaw.sessionTtlSecs}s</Badge>
       </div>
     </div>

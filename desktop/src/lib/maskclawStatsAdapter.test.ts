@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adaptMaskclawStats, kindPlates } from "./maskclawStatsAdapter";
+import { adaptMaskclawStats, forceLocalRouteLabel, kindPlates } from "./maskclawStatsAdapter";
 
 describe("kindPlates", () => {
   it("sorts by count then name", () => {
@@ -60,6 +60,16 @@ describe("adaptMaskclawStats", () => {
       ["email", 3],
       ["phone", 1],
     ]);
+  });
+
+  it("hides unused or uninstalled local-route pins", () => {
+    expect(forceLocalRouteLabel("never", "unsloth-local")).toBe("");
+    expect(forceLocalRouteLabel("always", "unsloth-local", ["lmstudio-local"])).toBe("");
+    expect(forceLocalRouteLabel("always", "lmstudio-local", ["lmstudio-local"])).toBe("lmstudio-local");
+    expect(forceLocalRouteLabel("always", "unsloth-local", ["unsloth-local"])).toBe("unsloth-local");
+    expect(forceLocalRouteLabel("on_unmaskable", "unsloth-local", ["unsloth-local", "minimax-m3"])).toBe(
+      "unsloth-local",
+    );
   });
 
   it("tolerates null", () => {

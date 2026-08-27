@@ -126,13 +126,18 @@ export function fetchModels(): Promise<unknown> {
   return call("fetch_models");
 }
 
-export function probeInvokeArgs(url: string, apiKey?: string): { url: string; apiKey: string | null } {
+export function probeInvokeArgs(
+  url: string,
+  apiKey?: string,
+  model?: string,
+): { url: string; apiKey: string | null; model: string | null } {
   const trimmed = apiKey?.trim();
-  return { url, apiKey: trimmed ? trimmed : null };
+  const modelId = model?.trim();
+  return { url, apiKey: trimmed ? trimmed : null, model: modelId ? modelId : null };
 }
 
-export function probeBackend(url: string, apiKey?: string): Promise<ProbeResult> {
-  return call("probe_backend", probeInvokeArgs(url, apiKey));
+export function probeBackend(url: string, apiKey?: string, model?: string): Promise<ProbeResult> {
+  return call("probe_backend", probeInvokeArgs(url, apiKey, model));
 }
 
 export function openExternalUrl(url: string): Promise<void> {
