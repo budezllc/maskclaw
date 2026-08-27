@@ -13,20 +13,15 @@ Two products, one repo:
 
 The engine under `engine/` is a Switchyard fork with the MaskClaw privacy layer. Desktop and the Pi both run that engine.
 
-## Desktop screenshots
+## Screenshots
 
-<p align="center">
-  <img src="docs/screenshots/home.png" alt="MASKCLAW DESKTOP HOME — engine live, tracks, and activity log" width="900">
-</p>
-<p align="center">
-  <img src="docs/screenshots/masked.png" alt="MASKCLAW DESKTOP MASKED — placeholder stats by kind" width="900">
-</p>
-<p align="center">
-  <img src="docs/screenshots/models.png" alt="MASKCLAW DESKTOP MODELS — cloud provider keys and routing" width="900">
-</p>
-<p align="center">
-  <img src="docs/screenshots/settings.png" alt="MASKCLAW DESKTOP SETTINGS — detectors and routes.toml" width="900">
-</p>
+![HOME](docs/screenshots/home.jpg)
+
+![MASKED](docs/screenshots/masked.jpg)
+
+![MODELS](docs/screenshots/models.jpg)
+
+![SETTINGS](docs/screenshots/settings.jpg)
 
 ```text
 MASKCLAW/
