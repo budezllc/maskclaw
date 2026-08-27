@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use process::{EngineState, ManagedChild, ProcessManager, RealChild};
 use secrets::SecretBinding;
+use tauri::include_image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -1081,7 +1082,8 @@ pub fn run() {
             let restart = MenuItem::with_id(app, "restart", "Restart", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &restart, &quit])?;
-            let mut tray = TrayIconBuilder::new()
+            let tray = TrayIconBuilder::with_id("main")
+                .icon(include_image!("../icons/icon.png"))
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => show_window(app),
@@ -1100,9 +1102,6 @@ pub fn run() {
                     _ => {}
                 })
                 .tooltip(app_display_name());
-            if let Some(icon) = app.default_window_icon() {
-                tray = tray.icon(icon.clone());
-            }
             tray.build(app)?;
 
             let toml_exists = active_routes_path(&data_dir).exists();

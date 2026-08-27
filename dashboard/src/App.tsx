@@ -349,7 +349,7 @@ export function App() {
             </SidebarHeader>
             <SidebarContent>
               <SidebarGroup>
-                <SidebarGroupLabel>Yard</SidebarGroupLabel>
+                <SidebarGroupLabel>MaskClaw</SidebarGroupLabel>
                 <SidebarGroupContent>
                   <SidebarMenu>
                     <SidebarMenuItem>
